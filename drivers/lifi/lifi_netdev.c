@@ -55,9 +55,10 @@ const netdev_driver_t lifi_driver = {
     .set  = lifi_set,
 };
 
-void lifi_on_gdo(void *_dev)
+void isr_callback_input_pin(void *_dev)
 {
     (void) _dev;
+    puts("got interrupt");
 //    cc110x_t *dev = _dev;
 //    if ((dev->state & 0x07) == CC110X_STATE_TX_MODE) {
 //        /* Unlock mutex to unblock netdev thread */
@@ -71,113 +72,41 @@ void lifi_on_gdo(void *_dev)
 
 static int lifi_init(netdev_t *netdev)
 {
-    (void)netdev;
-    return 1;
-//    cc110x_t *dev = (cc110x_t *)netdev;
-//    /* Use locked mutex to block thread on TX and un-block from ISR */
-//    mutex_init(&dev->isr_signal);
-//    mutex_lock(&dev->isr_signal);
-//
-//    /* Make sure the crystal is stable and the chip ready. This is needed as
-//     * the reset is done via an SPI command, but the SPI interface must not be
-//     * used unless the chip is ready according to the data sheet. After the
-//     * reset, a second call to cc110x_power_on_and_acquire() is needed to finally have
-//     * the transceiver in a known state and ready for SPI communication.
-//     */
-//    if (cc110x_power_on_and_acquire(dev)) {
-//        DEBUG("[cc110x] netdev_driver_t::init(): Failed to pull CS pin low\n");
-//        return -EIO;
-//    }
-//
-//    /* Performing a reset of the transceiver to get it in a known state */
-//    cc110x_cmd(dev, CC110X_STROBE_RESET);
-//    cc110x_release(dev);
-//
-//    /* Again, make sure the crystal is stable and the chip ready */
-//    if (cc110x_power_on_and_acquire(dev)) {
-//        DEBUG("[cc110x] netdev_driver_t::init(): Failed to pull CS pin low "
-//              "after reset\n");
-//        return -EIO;
-//    }
-//
-//    if (identify_device(dev)) {
-//        DEBUG("[cc110x] netdev_driver_t::init(): Device identification failed\n");
-//        cc110x_release(dev);
-//        return -ENOTSUP;
-//    }
-//
-//    /* Upload the main configuration */
-//    cc110x_burst_write(dev, CC110X_CONF_START, cc110x_conf, CC110X_CONF_SIZE);
-//    /* Set TX power to match uploaded configuration */
-//    dev->tx_power = CC110X_TX_POWER_0_DBM;
-//
-//    /* Upload the poorly documented magic numbers obtained via SmartRF Studio */
-//    cc110x_burst_write(dev, CC110X_REG_TEST2, cc110x_magic_registers,
-//                       sizeof(cc110x_magic_registers));
-//
-//    /* Setup the selected PA_TABLE */
-//    cc110x_burst_write(dev, CC110X_MULTIREG_PATABLE,
-//                       dev->params.patable->data, CC110X_PATABLE_LEN);
-//
-//    /* Verify main config, magic numbers and PA_TABLE correctly uploaded */
-//    if (check_config(dev)) {
-//        cc110x_release(dev);
-//        return -EIO;
-//    }
-//
-//    /* Verify that pins GDO2 and GDO0 are correctly connected */
-//    if (check_gdo_pins(dev)) {
-//        cc110x_release(dev);
-//        return -EIO;
-//    }
-//
-//    /* Setup the layer 2 address, but do not accept CC1XXX_BCAST_ADDR (which
-//     * has the value 0x00 and is used for broadcast)
-//     */
-//    cc1xxx_eui_get(&dev->netdev, &dev->addr);
-//    assert(dev->addr != CC1XXX_BCAST_ADDR);
-//    cc110x_write(dev, CC110X_REG_ADDR, dev->addr);
-//
-//    /* Setup interrupt on GDO0  */
-//    if (gpio_init_int(dev->params.gdo0, GPIO_IN, GPIO_BOTH,
-//                      cc110x_on_gdo, dev)) {
-//        cc110x_release(dev);
-//        DEBUG("[cc110x] netdev_driver_t::init(): Failed to setup interrupt on "
-//              "GDO0 pin\n");
-//        return -EIO;
-//    }
-//
-//    /* Setup interrupt on GDO2 */
-//    if (gpio_init_int(dev->params.gdo2, GPIO_IN, GPIO_BOTH,
-//                      cc110x_on_gdo, dev)) {
-//        gpio_irq_disable(dev->params.gdo0);
-//        cc110x_release(dev);
-//        DEBUG("[cc110x] netdev_driver_t::init(): Failed to setup interrupt on "
-//              "GDO2 pin\n");
-//        return -EIO;
-//    }
-//
-//    /* Update the state of the driver/transceiver */
-//    dev->state = CC110X_STATE_IDLE;
-//    cc110x_release(dev);
-//
-//    int retval; /*< Store return value to be able to pass through error code */
-//    /* Apply configuration (if non-NULL) and channel map, which also calls
-//     * cc110x_full_calibration
-//     */
-//    retval = cc110x_apply_config(dev, dev->params.config, dev->params.channels,
-//                                 CONFIG_CC110X_DEFAULT_CHANNEL);
-//    if (retval) {
-//        gpio_irq_disable(dev->params.gdo0);
-//        gpio_irq_disable(dev->params.gdo2);
-//        DEBUG("[cc110x] netdev_driver_t::init(): cc110x_apply_config() "
-//              "failed\n");
-//        /* Pass through received error code */
-//        return retval;
-//    }
-//
-//    DEBUG("[cc110x] netdev_driver_t::init(): Success\n");
-//    return 0;
+    lifi_t * lifi_dev = (lifi_t*) netdev;
+    const uint32_t frequency = 38000;
+    const uint16_t resolution = 255;
+    const uint16_t gain = resolution/2;
+    const pwm_t device = lifi_dev->params.outPutPwmDevice;
+    const pwm_mode_t mode = PWM_LEFT;
+
+    const gpio_flank_t detectedFlanks = GPIO_BOTH;
+    const gpio_t inputPin = lifi_dev->params.inputPin;
+
+    bool error = false;
+    uint8_t retval = 0;
+
+
+    // Todo: any mutexes for ISR like in CC1101?
+    if (0 == pwm_init(device, mode, frequency, resolution)) {
+        DEBUG("[lifi] netdev_driver_t::init(): Failed to setup pwm device\n");
+        retval = -EIO;
+        error = true;
+    }
+
+    if(!error){
+        if (gpio_init_int(inputPin, GPIO_IN, detectedFlanks, isr_callback_input_pin, NULL) != 0) {
+            DEBUG("[lifi] netdev_driver_t::init(): Failed to init input pin gpio interrupt\n");
+            retval = -EIO;
+            error = true;
+        }
+    }
+
+    if(!error){
+        DEBUG("[lifi] netdev_driver_t::init(): Success\n");
+    }
+    // todo update status of device
+    // todo setup address?
+    return retval;
 }
 
 static int lifi_recv(netdev_t *netdev, void *buf, size_t len, void *info)

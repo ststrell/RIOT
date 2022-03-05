@@ -33,8 +33,16 @@ extern "C" {
  * @{
  */
 
-#ifndef LIFI_PARAM_OUTPUT
-#define LIFI_PARAM_OUTPUT             GPIO_PIN(1, 21) /**< SPI-CS connected to LIFI */
+#ifndef LIFI_PARAM_OUTPUT_PWM_DEVICE
+#define LIFI_PARAM_OUTPUT_PWM_DEVICE             0 /**< SPI-CS connected to LIFI */
+#endif
+
+#ifndef LIFI_PARAM_OUTPUT_PWM_DEVICE_CHAN
+#define LIFI_PARAM_OUTPUT_PWM_DEVICE_CHAN             0 /**< SPI-CS connected to LIFI */
+#endif
+
+#ifndef LIFI_PARAM_INPUT_PIN
+#define LIFI_PARAM_INPUT_PIN             GPIO_PIN(PORT_F, 14) /**< SPI-CS connected to LIFI */
 #endif
 
 #ifndef LIFI_PARAMS
@@ -42,7 +50,9 @@ extern "C" {
  * @brief   Default initialization parameters of the CC110x driver
  */
 #define LIFI_PARAMS               { \
-        .outPut = LIFI_PARAM_OUTPUT \
+        .outPutPwmDevice = LIFI_PARAM_OUTPUT_PWM_DEVICE, \
+        .outPutPwmDeviceChannel = LIFI_PARAM_OUTPUT_PWM_DEVICE_CHAN, \
+        .inputPin = LIFI_PARAM_INPUT_PIN \
 }
 
 #endif

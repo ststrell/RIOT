@@ -38,7 +38,7 @@ extern const netdev_driver_t lifi_driver;
  * This interrupt handler requests that the cc110x ISR is called in thread
  * context
  */
-void lifi_on_gdo(void *dev);
+void isr_callback_input_pin(void *dev);
 
 #ifdef __cplusplus
 }
