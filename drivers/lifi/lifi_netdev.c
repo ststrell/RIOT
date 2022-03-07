@@ -21,6 +21,7 @@
 #include <errno.h>
 #include <string.h>
 #include <lifi_rx_tx.h>
+#include <cc1xxx_common.h>
 
 #include "assert.h"
 #include "iolist.h"
@@ -72,15 +73,15 @@ void isr_callback_input_pin(void *_dev)
 
 static int lifi_init(netdev_t *netdev)
 {
+    DEBUG("[LiFi] netdev_driver_t::init() called lifi_init fun\n");
     lifi_t * lifi_dev = (lifi_t*) netdev;
     const uint32_t frequency = 38000;
     const uint16_t resolution = 255;
-    const uint16_t gain = resolution/2;
-    const pwm_t device = lifi_dev->params.outPutPwmDevice;
+    const pwm_t device = lifi_dev->params.output_pwm_device;
     const pwm_mode_t mode = PWM_LEFT;
 
     const gpio_flank_t detectedFlanks = GPIO_BOTH;
-    const gpio_t inputPin = lifi_dev->params.inputPin;
+    const gpio_t inputPin = lifi_dev->params.input_pin;
 
     bool error = false;
     uint8_t retval = 0;
@@ -111,7 +112,6 @@ static int lifi_init(netdev_t *netdev)
 
 static int lifi_recv(netdev_t *netdev, void *buf, size_t len, void *info)
 {
-
     (void) netdev;
     (void) buf;
     (void) len;
@@ -262,11 +262,29 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
 static int lifi_get(netdev_t *netdev, netopt_t opt,
                       void *val, size_t max_len)
 {
-    (void)netdev;
-    (void)opt;
-    (void)val;
-    (void)max_len;
-    return 1;
+    DEBUG("Entering lifi_get function\n");
+    lifi_t *dev = (lifi_t *)netdev;
+
+    (void)max_len;  /* only used in assert() */
+    switch (opt) {
+    case NETOPT_DEVICE_TYPE:
+        assert(max_len == sizeof(uint16_t));
+        *((uint16_t *)val) = NETDEV_TYPE_CC110X;
+        return sizeof(uint16_t);
+        break;
+    case NETOPT_MAX_PDU_SIZE:
+        assert(max_len == sizeof(uint16_t));
+        *((uint16_t *)val) = CC110X_MAX_FRAME_SIZE - sizeof(cc1xxx_l2hdr_t);
+        return sizeof(uint16_t);
+    case NETOPT_ADDRESS:
+        assert(max_len >= CC1XXX_ADDR_SIZE);
+        *((uint8_t *)val) = dev->addr;
+        return CC1XXX_ADDR_SIZE;
+    default:
+        break;
+    }
+
+    return -ENOTSUP;
 //    cc110x_t *dev = (cc110x_t *)netdev;
 //
 //    (void)max_len;  /* only used in assert() */

@@ -70,6 +70,7 @@ static char stacks[1][LIFI_MAC_STACKSIZE];
 
 void auto_init_lifi(void)
 {
+    DEBUG("[LiFi] Auto init\n");
     lifi_setup(&lifi_dev,&lifi_params[0],0);
     gnrc_netif_cc1xxx_create(&lifi_netif, stacks[0], LIFI_MAC_STACKSIZE, LIFI_MAC_PRIO,
                              "lifi", &lifi_dev.netdev);

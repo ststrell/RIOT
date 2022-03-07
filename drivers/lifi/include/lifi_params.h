@@ -50,9 +50,9 @@ extern "C" {
  * @brief   Default initialization parameters of the CC110x driver
  */
 #define LIFI_PARAMS               { \
-        .outPutPwmDevice = LIFI_PARAM_OUTPUT_PWM_DEVICE, \
-        .outPutPwmDeviceChannel = LIFI_PARAM_OUTPUT_PWM_DEVICE_CHAN, \
-        .inputPin = LIFI_PARAM_INPUT_PIN \
+        .output_pwm_device = LIFI_PARAM_OUTPUT_PWM_DEVICE, \
+        .output_pwm_device_channel = LIFI_PARAM_OUTPUT_PWM_DEVICE_CHAN, \
+        .input_pin = LIFI_PARAM_INPUT_PIN \
 }
 
 #endif
