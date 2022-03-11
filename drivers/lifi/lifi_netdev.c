@@ -55,11 +55,94 @@ const netdev_driver_t lifi_driver = {
     .get  = lifi_get,
     .set  = lifi_set,
 };
-
+#define sendDatasize 3
+#define receiveDatasize 2
+uint8_t receivedData[receiveDatasize];
 void isr_callback_input_pin(void *_dev)
 {
-    (void) _dev;
-    puts("got interrupt");
+    lifi_t * lifi_dev = (lifi_t *) _dev;
+    static uint16_t currentBit = 0;
+    static uint16_t currentByte = 0;
+    static bool preamble = true;
+    static bool firstReceive = true;
+    static float meanHalfClockTicks = 0;
+    static xtimer_ticks32_t minTolHalfClock;
+    static xtimer_ticks32_t maxTolHalfClock;
+    static xtimer_ticks32_t lastReceive={};
+    static xtimer_ticks32_t lastHalfFlank={};
+    uint8_t expectedPreambleFlanks = 15; // we end at T/2
+    static uint8_t preambleFlankCounter = 0;
+    static bool previousStateHigh = false;
+
+    if (preamble){
+        preambleFlankCounter++;
+        if(firstReceive){
+            lastReceive = xtimer_now();
+            firstReceive = false;
+
+//            puts("start preamble");
+        } else {
+            xtimer_ticks32_t timediff = xtimer_diff(xtimer_now(), lastReceive);
+            meanHalfClockTicks += (float)timediff.ticks32 / (float) expectedPreambleFlanks;
+            lastReceive = xtimer_now();
+        }
+        if(preambleFlankCounter >= expectedPreambleFlanks){
+//            puts("end preamble");
+            preamble = false;
+            gpio_t pin = GPIO_PIN(PORT_F, 15);
+            gpio_init(pin, GPIO_OUT);
+            pin = GPIO_PIN(PORT_G, 14);
+            gpio_init(pin, GPIO_OUT);
+            minTolHalfClock.ticks32 = (uint32_t) (0.75 * meanHalfClockTicks);
+            maxTolHalfClock.ticks32 = (uint32_t) (1.25 * meanHalfClockTicks);
+//            printf("meanHalfClock %u\n",(uint16_t)meanHalfClockTicks);
+            previousStateHigh = gpio_read(lifi_dev->params.input_pin) != 0;
+            preambleFlankCounter = 0;
+            lastHalfFlank = xtimer_now();
+        }
+    } else {
+        // we are now at the end of a full period, next edge should come in T/2
+        xtimer_ticks32_t timediff = xtimer_diff(xtimer_now(), lastHalfFlank);
+        if(timediff.ticks32 >= minTolHalfClock.ticks32 && timediff.ticks32 <= maxTolHalfClock.ticks32) {
+//            puts("Drop full flank");
+            gpio_toggle(GPIO_PIN(PORT_F, 15));
+        }
+        else if(timediff.ticks32 >= minTolHalfClock.ticks32 *2 && timediff.ticks32 <= 2* maxTolHalfClock.ticks32) {
+            lastHalfFlank = xtimer_now();
+            // edge is in expected timing
+            if (currentByte < receiveDatasize) {
+                if (gpio_read(lifi_dev->params.input_pin) == 0) {
+//                    puts("got falling edge");
+                    gpio_set(GPIO_PIN(PORT_G, 14));
+                    receivedData[currentByte] |= 1 << currentBit++;
+                } else {
+//                    puts("got rising edge");
+                    gpio_clear(GPIO_PIN(PORT_G, 14));
+                    receivedData[currentByte] &= ~(1 << currentBit++);
+                }
+            }
+            if (currentBit >= 8){
+                currentBit = 0;
+                currentByte++;
+            }
+            if (currentByte >= receiveDatasize) {
+                for (int byte = 0; byte < receiveDatasize; ++byte) {
+//                    printf("%u \n", receivedData[byte]);
+                    printf("%c \n",(char) receivedData[byte]);
+                    for (int bit = 0; bit < 8; bit++){
+                        printf("%u \n", (receivedData[byte] >> bit) & 0b1);
+                    }
+                }
+                preamble = true;
+                currentBit = 0;
+            }
+
+        } else {
+            puts("Timing does not fit!\n");
+        }
+
+    }
+//    puts("got interrupt");
 //    cc110x_t *dev = _dev;
 //    if ((dev->state & 0x07) == CC110X_STATE_TX_MODE) {
 //        /* Unlock mutex to unblock netdev thread */
@@ -99,7 +182,7 @@ static int lifi_init(netdev_t *netdev)
     }
 
     if(!error){
-        if (gpio_init_int(inputPin, GPIO_IN, detectedFlanks, isr_callback_input_pin, NULL) != 0) {
+        if (gpio_init_int(inputPin, GPIO_IN, detectedFlanks, isr_callback_input_pin, lifi_dev) != 0) {
             DEBUG("[lifi] netdev_driver_t::init(): Failed to init input pin gpio interrupt\n");
             retval = -EIO;
             error = true;
@@ -174,14 +257,15 @@ void manchesterSend(netdev_t *netdev){
     gpio_init(pin, GPIO_OUT);
     gpio_t clock = GPIO_PIN(PORT_E, 13);
     gpio_init(clock, GPIO_OUT);
-    const uint16_t clockFrequency = 10;
-    #define datasize 5
-    uint8_t data[datasize] = {0b10100111,0b11111111,0b11111111,0b10100111,0b10100111};
+    const uint16_t clockFrequency = 100;
+
+    uint8_t data[sendDatasize] = {0b11111111,'F','e'};
+    // ,0b11111111,0b11111111,0b10100111,0b10100111};
     bool oldStateHigh = false;
     pwm_set(device, channel, 0);
     gpio_clear(pin);
 
-    for (uint8_t byte = 0; byte < datasize; ++byte) {
+    for (uint8_t byte = 0; byte < sendDatasize; ++byte) {
         for (int8_t bit = 7; bit >= 0; bit--) {
             gpio_toggle(clock);
             // IEEE 802.3 rising edge for logic 1
