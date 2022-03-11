@@ -78,6 +78,7 @@ static int lifi_init(netdev_t *netdev)
     const uint32_t frequency = 38000;
     const uint16_t resolution = 255;
     const pwm_t device = lifi_dev->params.output_pwm_device;
+    const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
     const pwm_mode_t mode = PWM_LEFT;
 
     const gpio_flank_t detectedFlanks = GPIO_BOTH;
@@ -92,6 +93,9 @@ static int lifi_init(netdev_t *netdev)
         DEBUG("[lifi] netdev_driver_t::init(): Failed to setup pwm device\n");
         retval = -EIO;
         error = true;
+    }
+    if(!error){
+        pwm_set(device, channel, 0);
     }
 
     if(!error){
@@ -152,12 +156,93 @@ static int lifi_recv(netdev_t *netdev, void *buf, size_t len, void *info)
 //    cc110x_release(dev);
 //    return size;
 }
+void manchesterSend(netdev_t *netdev){
 
+    lifi_t * lifi_dev = (lifi_t*) netdev;
+    const uint32_t frequency = 38000;
+    const uint16_t resolution = 255;
+    const uint16_t gain = resolution/2;
+    const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
+    const pwm_t device = lifi_dev->params.output_pwm_device;
+    const uint32_t secToUsec = 1000000;
+
+    uint32_t signalLengthUs = 1000;
+    uint32_t sleepTimeUs = 2500;
+    uint32_t sendDurationInSec = 10;
+
+    gpio_t pin = GPIO_PIN(PORT_E, 11);
+    gpio_init(pin, GPIO_OUT);
+    gpio_t clock = GPIO_PIN(PORT_E, 13);
+    gpio_init(clock, GPIO_OUT);
+    const uint16_t clockFrequency = 10;
+    #define datasize 5
+    uint8_t data[datasize] = {0b10100111,0b11111111,0b11111111,0b10100111,0b10100111};
+    bool oldStateHigh = false;
+    pwm_set(device, channel, 0);
+    gpio_clear(pin);
+
+    for (uint8_t byte = 0; byte < datasize; ++byte) {
+        for (int8_t bit = 7; bit >= 0; bit--) {
+            gpio_toggle(clock);
+            // IEEE 802.3 rising edge for logic 1
+            if ((data[byte] >> bit) & 0b1) {
+                gpio_set(pin);
+                if (oldStateHigh) {
+                    pwm_set(device, channel, 0);
+                    xtimer_msleep(clockFrequency / 2);
+                    pwm_set(device, channel, gain);
+                    xtimer_msleep(clockFrequency / 2);
+                } else {
+                    xtimer_msleep(clockFrequency / 2);
+                    pwm_set(device, channel, gain);
+                    xtimer_msleep(clockFrequency / 2);
+                }
+                oldStateHigh = true;
+            } else {
+                // IEEE 802.3 falling edge for logic 0
+                gpio_clear(pin);
+                if (oldStateHigh) {
+                    xtimer_msleep(clockFrequency / 2);
+                    pwm_set(device, channel, 0);
+                    xtimer_msleep(clockFrequency / 2);
+                } else {
+                    pwm_set(device, channel, gain);
+                    xtimer_msleep(clockFrequency / 2);
+                    pwm_set(device, channel, 0);
+                    xtimer_msleep(clockFrequency / 2);
+                }
+                oldStateHigh = false;
+            }
+        }
+    }
+        pwm_set(device, channel, 0); // turn off pwm
+        gpio_clear(pin);
+
+}
 static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
 {
 
-    (void)netdev;
-    (void)iolist;
+    manchesterSend(netdev);
+//    lifi_t * lifi_dev = (lifi_t*) netdev;
+//    const uint32_t frequency = 38000;
+//    const uint16_t resolution = 255;
+//    const uint16_t gain = resolution/2;
+//    const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
+//    const pwm_t device = lifi_dev->params.output_pwm_device;
+//    const uint32_t secToUsec = 1000000;
+//
+//    uint32_t signalLengthUs = 1000;
+//    uint32_t sleepTimeUs = 2500;
+//    uint32_t sendDurationInSec = 10;
+//    xtimer_ticks32_t start = xtimer_now();
+//    while (xtimer_usec_from_ticks(xtimer_diff(xtimer_now(), start)) < (sendDurationInSec * secToUsec)) {
+////        puts("Sending");
+//        pwm_set(device, channel, gain);
+//        xtimer_usleep(signalLengthUs);
+//        pwm_set(device, channel, 0);
+//        xtimer_msleep(sleepTimeUs);
+//    }
+
     return 1;
 //    cc110x_t *dev = (cc110x_t *)netdev;
 //
