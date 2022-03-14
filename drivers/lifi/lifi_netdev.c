@@ -55,13 +55,13 @@ const netdev_driver_t lifi_driver = {
     .get  = lifi_get,
     .set  = lifi_set,
 };
-#define sendDatasize 3
-#define receiveDatasize 2
+#define sendDatasize 7
+#define receiveDatasize 6
 uint8_t receivedData[receiveDatasize];
 void isr_callback_input_pin(void *_dev)
 {
     lifi_t * lifi_dev = (lifi_t *) _dev;
-    static uint16_t currentBit = 0;
+    static int8_t currentBit = 7;
     static uint16_t currentByte = 0;
     static bool preamble = true;
     static bool firstReceive = true;
@@ -114,24 +114,25 @@ void isr_callback_input_pin(void *_dev)
                 if (gpio_read(lifi_dev->params.input_pin) == 0) {
 //                    puts("got falling edge");
                     gpio_set(GPIO_PIN(PORT_G, 14));
-                    receivedData[currentByte] |= 1 << currentBit++;
+                    receivedData[currentByte] |= 1 << currentBit--;
                 } else {
 //                    puts("got rising edge");
                     gpio_clear(GPIO_PIN(PORT_G, 14));
-                    receivedData[currentByte] &= ~(1 << currentBit++);
+                    receivedData[currentByte] &= ~(1 << currentBit--);
                 }
             }
-            if (currentBit >= 8){
-                currentBit = 0;
+            if (currentBit <= -1){
+                currentBit = 7;
                 currentByte++;
             }
             if (currentByte >= receiveDatasize) {
                 for (int byte = 0; byte < receiveDatasize; ++byte) {
 //                    printf("%u \n", receivedData[byte]);
-                    printf("%c \n",(char) receivedData[byte]);
-                    for (int bit = 0; bit < 8; bit++){
-                        printf("%u \n", (receivedData[byte] >> bit) & 0b1);
-                    }
+                    printf("char: %c \n",(char) receivedData[byte]);
+//                    printf("num: %u \n", receivedData[byte]);
+//                    for (int bit = 0; bit < 8; bit++){
+//                        printf("%u \n", (receivedData[byte] >> bit) & 0b1);
+//                    }
                 }
                 preamble = true;
                 currentBit = 0;
@@ -259,7 +260,7 @@ void manchesterSend(netdev_t *netdev){
     gpio_init(clock, GPIO_OUT);
     const uint16_t clockFrequency = 100;
 
-    uint8_t data[sendDatasize] = {0b11111111,'F','e'};
+    uint8_t data[sendDatasize] = {0b11111111,'F','e','r','k','e','l'};
     // ,0b11111111,0b11111111,0b10100111,0b10100111};
     bool oldStateHigh = false;
     pwm_set(device, channel, 0);
