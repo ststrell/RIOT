@@ -31,6 +31,8 @@ extern "C" {
  */
 void lifi_isr(netdev_t *dev);
 
+void lifi_send_frame(lifi_t* lifi_dev);
+
 /**
  * @brief   Bring transceiver into RX mode
  *

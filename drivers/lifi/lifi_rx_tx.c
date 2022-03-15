@@ -329,3 +329,83 @@ void lifi_isr(netdev_t *netdev)
 //        dev->netdev.event_callback(&dev->netdev, post_isr_event);
 //    }
 }
+
+static void lifi_send_bits(lifi_t* lifi_dev,uint16_t num_bytes, uint8_t* bytes){
+    const uint16_t resolution = 255;
+    const uint16_t gain = resolution / 2;
+    const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
+    const pwm_t device = lifi_dev->params.output_pwm_device;
+    lifi_framebuf_t * framebuf = &lifi_dev->output_buf;
+
+    gpio_t pin = GPIO_PIN(PORT_E, 11);
+    gpio_t clock = GPIO_PIN(PORT_E, 13);
+
+    const uint16_t sleepTimeUs = 1000;
+
+    static bool oldStateHigh = false;
+
+    for(uint16_t byte = 0; byte < num_bytes; byte++){
+        for (int8_t bit = 7; bit >= 0; bit--) {
+            gpio_toggle(clock);
+            // IEEE 802.3 rising edge for logic 1
+            if ((bytes[byte] >> bit) & 0b1) {
+                gpio_set(pin);
+                if (oldStateHigh) {
+                    pwm_set(device, channel, 0);
+                    xtimer_usleep(sleepTimeUs / 2);
+                    pwm_set(device, channel, gain);
+                    xtimer_usleep(sleepTimeUs / 2);
+                }
+                else {
+                    xtimer_usleep(sleepTimeUs / 2);
+                    pwm_set(device, channel, gain);
+                    xtimer_usleep(sleepTimeUs / 2);
+                }
+                oldStateHigh = true;
+            }
+            else {
+                // IEEE 802.3 falling edge for logic 0
+                gpio_clear(pin);
+                if (oldStateHigh) {
+                    xtimer_usleep(sleepTimeUs / 2);
+                    pwm_set(device, channel, 0);
+                    xtimer_usleep(sleepTimeUs / 2);
+                }
+                else {
+                    pwm_set(device, channel, gain);
+                    xtimer_usleep(sleepTimeUs / 2);
+                    pwm_set(device, channel, 0);
+                    xtimer_usleep(sleepTimeUs / 2);
+                }
+                oldStateHigh = false;
+            }
+        }
+        framebuf->pos++;
+    }
+}
+
+void lifi_send_frame(lifi_t* lifi_dev){
+    const uint16_t resolution = 255;
+    const uint16_t gain = resolution / 2;
+    const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
+    const pwm_t device = lifi_dev->params.output_pwm_device;
+    lifi_framebuf_t * framebuf = &lifi_dev->output_buf;
+    gpio_t pin = GPIO_PIN(PORT_E, 11);
+
+    gpio_init(pin, GPIO_OUT);
+    gpio_t clock = GPIO_PIN(PORT_E, 13);
+
+    gpio_init(clock, GPIO_OUT);
+    const uint16_t sleepTimeUs = 1000;
+
+    framebuf->crc_16 = 0;
+
+    lifi_send_bits(lifi_dev, sizeof(framebuf->preamble),&framebuf->preamble);
+    lifi_send_bits(lifi_dev, sizeof(framebuf->len),&framebuf->len);
+    lifi_send_bits(lifi_dev, framebuf->len,framebuf->payload);
+    lifi_send_bits(lifi_dev, sizeof(framebuf->crc_16), (uint8_t *) &framebuf->crc_16);
+
+    framebuf->pos = 0;
+    pwm_set(device, channel, 0);     // turn off pwm
+    gpio_clear(pin);
+}
