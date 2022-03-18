@@ -57,97 +57,132 @@ const netdev_driver_t lifi_driver = {
     .get = lifi_get,
     .set = lifi_set,
 };
+
+#define FULL_EDGES_DROP_PIN GPIO_PIN(PORT_F, 15)
+#define BIT_INTERPRETATION_PIN GPIO_PIN(PORT_G, 14)
+#define TIMING_ISSUE_PIN GPIO_PIN(PORT_B, 8)
+#define RECEIVE_INTERRUPT GPIO_PIN(PORT_B, 9)
+#define TIMEOUT_TICKS xtimer_ticks_from_usec(10000)
 #define sendDatasize 85
 #define receiveDatasize (sendDatasize -1)
 uint8_t receivedData[receiveDatasize];
+
+void read_store_bit(lifi_t* lifi_dev, uint8_t* storage_byte, uint8_t bit_to_read){
+
+        if (gpio_read(lifi_dev->params.input_pin) == 0) {
+//                    puts("got falling edge");
+            gpio_set(BIT_INTERPRETATION_PIN);
+            *storage_byte |= 1 << bit_to_read;
+        }
+        else {
+//                    puts("got rising edge");
+            gpio_clear(BIT_INTERPRETATION_PIN);
+            *storage_byte &= ~(1 << bit_to_read);
+        }
+}
+
+void lifi_preamble_sync(lifi_t* lifi_dev){
+    const uint8_t expectedPreambleFlanks = 15; // we end at T/2
+    static uint8_t preambleFlankCounter = 0;
+    preambleFlankCounter++;
+    lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
+
+    if (transceiver_state->current_frame_part == e_first_receive) {
+        transceiver_state->lastReceive = xtimer_now();
+        transceiver_state->meanHalfClockTicks = 0;
+        transceiver_state->min_tolerated_half_clock.ticks32 = 0;
+        transceiver_state->max_tolerated_half_clock.ticks32 = 0;
+        preambleFlankCounter = 0;
+        transceiver_state->current_frame_part = e_preamble;
+    }
+    else {
+        xtimer_ticks32_t timediff = xtimer_diff(xtimer_now(), transceiver_state->lastReceive);
+        transceiver_state->meanHalfClockTicks += (float)timediff.ticks32 / (float)expectedPreambleFlanks;
+        transceiver_state->lastReceive = xtimer_now();
+        if (preambleFlankCounter >= expectedPreambleFlanks -1) {
+            gpio_toggle(RECEIVE_INTERRUPT);
+                transceiver_state->lastHalfFlank = xtimer_now();
+            transceiver_state->current_frame_part = e_len;
+            transceiver_state->min_tolerated_half_clock.ticks32 = (uint32_t)(0.6 * transceiver_state->meanHalfClockTicks);
+            transceiver_state->max_tolerated_half_clock.ticks32 = (uint32_t)(1.4 * transceiver_state->meanHalfClockTicks);
+    //            printf("meanHalfClock %u\n",(uint16_t)meanHalfClockTicks);
+            transceiver_state->previousStateHigh = gpio_read(lifi_dev->params.input_pin) != 0;
+        }
+    }
+}
 void isr_callback_input_pin(void *_dev)
 {
+//    gpio_toggle(RECEIVE_INTERRUPT);
     lifi_t *lifi_dev = (lifi_t *)_dev;
     static int8_t currentBit = 7;
     static uint16_t currentByte = 0;
-    static bool preamble = true;
-    static bool firstReceive = true;
-    static float meanHalfClockTicks = 0;
-    static xtimer_ticks32_t minTolHalfClock;
-    static xtimer_ticks32_t maxTolHalfClock;
-    static xtimer_ticks32_t lastReceive = {};
-    static xtimer_ticks32_t lastHalfFlank = {};
-    uint8_t expectedPreambleFlanks = 15; // we end at T/2
-    static uint8_t preambleFlankCounter = 0;
-    static bool previousStateHigh = false;
+    lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
 
-    if (preamble) {
-        preambleFlankCounter++;
-        if (firstReceive) {
-            lastReceive = xtimer_now();
-            firstReceive = false;
-
-//            puts("start preamble");
-        }
-        else {
-            xtimer_ticks32_t timediff = xtimer_diff(xtimer_now(), lastReceive);
-            meanHalfClockTicks += (float)timediff.ticks32 / (float)expectedPreambleFlanks;
-            lastReceive = xtimer_now();
-        }
-        if (preambleFlankCounter >= expectedPreambleFlanks) {
-//            puts("end preamble");
-            preamble = false;
-            gpio_t pin = GPIO_PIN(PORT_F, 15);
-            gpio_init(pin, GPIO_OUT);
-            pin = GPIO_PIN(PORT_G, 14);
-            gpio_init(pin, GPIO_OUT);
-            minTolHalfClock.ticks32 = (uint32_t)(0.75 * meanHalfClockTicks);
-            maxTolHalfClock.ticks32 = (uint32_t)(1.25 * meanHalfClockTicks);
-//            printf("meanHalfClock %u\n",(uint16_t)meanHalfClockTicks);
-            previousStateHigh = gpio_read(lifi_dev->params.input_pin) != 0;
-            preambleFlankCounter = 0;
-            lastHalfFlank = xtimer_now();
-        }
+    if(transceiver_state->current_frame_part == e_preamble && xtimer_diff(xtimer_now(),transceiver_state->lastReceive).ticks32 > TIMEOUT_TICKS.ticks32){
+        transceiver_state->current_frame_part = e_first_receive;
+        currentByte = 0;
+        currentBit = 7;
+    }
+    if((transceiver_state->current_frame_part == e_len || transceiver_state->current_frame_part == e_payload ||transceiver_state->current_frame_part == e_crc16)
+    &&xtimer_diff(xtimer_now(),transceiver_state->lastHalfFlank).ticks32 > TIMEOUT_TICKS.ticks32 ){
+        transceiver_state->current_frame_part = e_first_receive;
+        currentByte = 0;
+        currentBit = 7;
+//        puts("timeout");
+    }
+    if (transceiver_state->current_frame_part == e_first_receive || transceiver_state->current_frame_part == e_preamble) {
+        lifi_preamble_sync(lifi_dev);
     }
     else {
         // we are now at the end of a full period, next edge should come in T/2
-        xtimer_ticks32_t timediff = xtimer_diff(xtimer_now(), lastHalfFlank);
-        if (timediff.ticks32 >= minTolHalfClock.ticks32 &&
-            timediff.ticks32 <= maxTolHalfClock.ticks32) {
-//            puts("Drop full flank");
-            gpio_toggle(GPIO_PIN(PORT_F, 15));
+        xtimer_ticks32_t timediff = xtimer_diff(xtimer_now(), transceiver_state->lastHalfFlank);
+        if (timediff.ticks32 >= transceiver_state->min_tolerated_half_clock.ticks32 &&
+            timediff.ticks32 <= transceiver_state->max_tolerated_half_clock.ticks32) {
+            // Drop edges on full T
+            gpio_toggle(FULL_EDGES_DROP_PIN);
         }
-        else if (timediff.ticks32 >= minTolHalfClock.ticks32 * 2 &&
-                 timediff.ticks32 <= 2 * maxTolHalfClock.ticks32) {
-            lastHalfFlank = xtimer_now();
+        else if (timediff.ticks32 >= transceiver_state->min_tolerated_half_clock.ticks32 * 2 &&
+                 timediff.ticks32 <= 2 * transceiver_state->max_tolerated_half_clock.ticks32) {
+            transceiver_state->lastHalfFlank = xtimer_now();
             // edge is in expected timing
-            if (currentByte < receiveDatasize) {
-                if (gpio_read(lifi_dev->params.input_pin) == 0) {
-//                    puts("got falling edge");
-                    gpio_set(GPIO_PIN(PORT_G, 14));
-                    receivedData[currentByte] |= 1 << currentBit--;
-                }
-                else {
-//                    puts("got rising edge");
-                    gpio_clear(GPIO_PIN(PORT_G, 14));
-                    receivedData[currentByte] &= ~(1 << currentBit--);
-                }
+
+            if(transceiver_state->current_frame_part == e_len) {
+                read_store_bit(lifi_dev,&lifi_dev->input_buf.len , currentBit--);
+            } else if(transceiver_state->current_frame_part == e_payload){
+                read_store_bit(lifi_dev,&lifi_dev->input_buf.payload[currentByte-1] , currentBit--);
+            } else {
+//                printf("reached crc: %u\n",currentByte);
+                read_store_bit(lifi_dev,&(((uint8_t*)&lifi_dev->input_buf.crc_16)[currentByte - lifi_dev->input_buf.len -1]) , currentBit--);
             }
-            if (currentBit <= -1) {
+            if (currentBit <= -1 ) {
+                if (currentByte == 0){
+                    transceiver_state->current_frame_part = e_payload;
+                } else if(currentByte == lifi_dev->input_buf.len){
+                    transceiver_state->current_frame_part = e_crc16;
+                }
                 currentBit = 7;
                 currentByte++;
             }
-            if (currentByte >= receiveDatasize) {
-                for (int byte = 0; byte < receiveDatasize; ++byte) {
-//                    printf("%u \n", receivedData[byte]);
-                    printf("char: %c \n", (char)receivedData[byte]);
-//                    printf("num: %u \n", receivedData[byte]);
-//                    for (int bit = 0; bit < 8; bit++){
-//                        printf("%u \n", (receivedData[byte] >> bit) & 0b1);
-//                    }
+            if (currentByte == -1 + lifi_dev->input_buf.len + sizeof(lifi_dev->input_buf.len)+ sizeof(lifi_dev->input_buf.crc_16) && currentBit == 0) {
+                for (int byte = 0; byte < lifi_dev->input_buf.len; ++byte) {
+//                printf("%u \n", receivedData[byte]);
+                    printf("char: %c \n", lifi_dev->input_buf.payload[byte]);
+//                printf("num: %u \n", receivedData[byte]);
+//                for (int bit = 0; bit < 8; bit++){
+//                    printf("%u \n", (receivedData[byte] >> bit) & 0b1);
+//                }
                 }
-                preamble = true;
-                currentBit = 0;
-            }
+                puts("resetting");
+                printf("crc %u\n",lifi_dev->input_buf.crc_16);
+                transceiver_state->current_frame_part = e_first_receive;
+                currentByte = 0;
+                currentBit = 7;
 
+            }
         }
         else {
-            puts("Timing does not fit!\n");
+            gpio_toggle(TIMING_ISSUE_PIN);
+//            puts("Timing!");
         }
 
     }
@@ -178,6 +213,11 @@ static int lifi_init(netdev_t *netdev)
 
     bool error = false;
     uint8_t retval = 0;
+
+    gpio_init(TIMING_ISSUE_PIN,GPIO_OUT);
+    gpio_init(FULL_EDGES_DROP_PIN,GPIO_OUT);
+    gpio_init(BIT_INTERPRETATION_PIN,GPIO_OUT);
+    gpio_init(RECEIVE_INTERRUPT,GPIO_OUT);
 
 
     // Todo: any mutexes for ISR like in CC1101?
@@ -262,6 +302,10 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
 
     for (const iolist_t *iol = iolist->iol_next; iol; iol = iol->iol_next) {
         if (iol->iol_len) {
+            if(iol->iol_len == 8 || iol->iol_len == 4){
+                // Todo remove after debugging
+                return -1;
+            }
             if (size + iol->iol_len > CC110X_MAX_FRAME_SIZE) {
                 DEBUG("[liFi] netdev_driver_t::send(): Frame size of %uB "
                       "exceeds maximum supported size of %uB\n",

@@ -23,6 +23,9 @@
 #define ENABLE_DEBUG 0
 #include "debug.h"
 
+#define CLOCK_PIN GPIO_PIN(PORT_E, 13)
+#define DATA_SENDER_PIN GPIO_PIN(PORT_E, 11)
+
 /* Use NETDEV_EVENT_ISR to indicate that no event needs to be passed to upper
  * layer at end of ISR, as ISR will never need this event
  */
@@ -337,19 +340,16 @@ static void lifi_send_bits(lifi_t* lifi_dev,uint16_t num_bytes, uint8_t* bytes){
     const pwm_t device = lifi_dev->params.output_pwm_device;
     lifi_framebuf_t * framebuf = &lifi_dev->output_buf;
 
-    gpio_t pin = GPIO_PIN(PORT_E, 11);
-    gpio_t clock = GPIO_PIN(PORT_E, 13);
-
     const uint16_t sleepTimeUs = 1000;
 
     static bool oldStateHigh = false;
 
     for(uint16_t byte = 0; byte < num_bytes; byte++){
         for (int8_t bit = 7; bit >= 0; bit--) {
-            gpio_toggle(clock);
+            gpio_toggle(CLOCK_PIN);
             // IEEE 802.3 rising edge for logic 1
             if ((bytes[byte] >> bit) & 0b1) {
-                gpio_set(pin);
+                gpio_set(DATA_SENDER_PIN);
                 if (oldStateHigh) {
                     pwm_set(device, channel, 0);
                     xtimer_usleep(sleepTimeUs / 2);
@@ -365,7 +365,7 @@ static void lifi_send_bits(lifi_t* lifi_dev,uint16_t num_bytes, uint8_t* bytes){
             }
             else {
                 // IEEE 802.3 falling edge for logic 0
-                gpio_clear(pin);
+                gpio_clear(DATA_SENDER_PIN);
                 if (oldStateHigh) {
                     xtimer_usleep(sleepTimeUs / 2);
                     pwm_set(device, channel, 0);
@@ -390,15 +390,13 @@ void lifi_send_frame(lifi_t* lifi_dev){
     const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
     const pwm_t device = lifi_dev->params.output_pwm_device;
     lifi_framebuf_t * framebuf = &lifi_dev->output_buf;
-    gpio_t pin = GPIO_PIN(PORT_E, 11);
 
-    gpio_init(pin, GPIO_OUT);
-    gpio_t clock = GPIO_PIN(PORT_E, 13);
+    gpio_init(DATA_SENDER_PIN, GPIO_OUT);
 
-    gpio_init(clock, GPIO_OUT);
+    gpio_init(CLOCK_PIN, GPIO_OUT);
     const uint16_t sleepTimeUs = 1000;
 
-    framebuf->crc_16 = 0;
+    framebuf->crc_16 = 33487;
 
     lifi_send_bits(lifi_dev, sizeof(framebuf->preamble),&framebuf->preamble);
     lifi_send_bits(lifi_dev, sizeof(framebuf->len),&framebuf->len);
@@ -407,5 +405,5 @@ void lifi_send_frame(lifi_t* lifi_dev){
 
     framebuf->pos = 0;
     pwm_set(device, channel, 0);     // turn off pwm
-    gpio_clear(pin);
+    gpio_clear(DATA_SENDER_PIN);
 }
