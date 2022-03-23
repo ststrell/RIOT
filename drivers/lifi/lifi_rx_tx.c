@@ -19,12 +19,14 @@
 
 #include "xtimer.h"
 #include "lifi.h"
+#include "lifi_rx_tx.h"
 
 #define ENABLE_DEBUG 0
 #include "debug.h"
 
-#define CLOCK_PIN GPIO_PIN(PORT_E, 13)
-#define DATA_SENDER_PIN GPIO_PIN(PORT_E, 11)
+#define RESOLUTION 255
+#define HIGH_GAIN (RESOLUTION / 2)
+#define LOW_GAIN 0
 
 /* Use NETDEV_EVENT_ISR to indicate that no event needs to be passed to upper
  * layer at end of ISR, as ISR will never need this event
@@ -333,9 +335,19 @@ void lifi_isr(netdev_t *netdev)
 //    }
 }
 
+static void send_single_edge(pwm_t device, uint8_t channel,uint16_t sleepTimeUs, uint8_t gain){
+    xtimer_usleep(sleepTimeUs / 2);
+    pwm_set(device, channel, gain);
+    xtimer_usleep(sleepTimeUs / 2);
+}
+static void send_double_edge(pwm_t device, uint8_t channel,uint16_t sleepTimeUs, uint8_t gain){
+    pwm_set(device, channel, gain == HIGH_GAIN ? LOW_GAIN : HIGH_GAIN);
+    xtimer_usleep(sleepTimeUs / 2);
+    pwm_set(device, channel, gain == HIGH_GAIN ? HIGH_GAIN :LOW_GAIN);
+    xtimer_usleep(sleepTimeUs / 2);
+}
+
 static void lifi_send_bits(lifi_t* lifi_dev,uint16_t num_bytes, uint8_t* bytes){
-    const uint16_t resolution = 255;
-    const uint16_t gain = resolution / 2;
     const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
     const pwm_t device = lifi_dev->params.output_pwm_device;
     lifi_framebuf_t * framebuf = &lifi_dev->output_buf;
@@ -351,15 +363,10 @@ static void lifi_send_bits(lifi_t* lifi_dev,uint16_t num_bytes, uint8_t* bytes){
             if ((bytes[byte] >> bit) & 0b1) {
                 gpio_set(DATA_SENDER_PIN);
                 if (oldStateHigh) {
-                    pwm_set(device, channel, 0);
-                    xtimer_usleep(sleepTimeUs / 2);
-                    pwm_set(device, channel, gain);
-                    xtimer_usleep(sleepTimeUs / 2);
+                    send_double_edge(device, channel, sleepTimeUs, HIGH_GAIN);
                 }
                 else {
-                    xtimer_usleep(sleepTimeUs / 2);
-                    pwm_set(device, channel, gain);
-                    xtimer_usleep(sleepTimeUs / 2);
+                    send_single_edge(device, channel, sleepTimeUs, HIGH_GAIN);
                 }
                 oldStateHigh = true;
             }
@@ -367,15 +374,10 @@ static void lifi_send_bits(lifi_t* lifi_dev,uint16_t num_bytes, uint8_t* bytes){
                 // IEEE 802.3 falling edge for logic 0
                 gpio_clear(DATA_SENDER_PIN);
                 if (oldStateHigh) {
-                    xtimer_usleep(sleepTimeUs / 2);
-                    pwm_set(device, channel, 0);
-                    xtimer_usleep(sleepTimeUs / 2);
+                    send_single_edge(device, channel, sleepTimeUs, LOW_GAIN);
                 }
                 else {
-                    pwm_set(device, channel, gain);
-                    xtimer_usleep(sleepTimeUs / 2);
-                    pwm_set(device, channel, 0);
-                    xtimer_usleep(sleepTimeUs / 2);
+                    send_double_edge(device, channel, sleepTimeUs, LOW_GAIN);
                 }
                 oldStateHigh = false;
             }
@@ -385,8 +387,6 @@ static void lifi_send_bits(lifi_t* lifi_dev,uint16_t num_bytes, uint8_t* bytes){
 }
 
 void lifi_send_frame(lifi_t* lifi_dev){
-    const uint16_t resolution = 255;
-    const uint16_t gain = resolution / 2;
     const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
     const pwm_t device = lifi_dev->params.output_pwm_device;
     lifi_framebuf_t * framebuf = &lifi_dev->output_buf;
@@ -394,9 +394,11 @@ void lifi_send_frame(lifi_t* lifi_dev){
     gpio_init(DATA_SENDER_PIN, GPIO_OUT);
 
     gpio_init(CLOCK_PIN, GPIO_OUT);
-    const uint16_t sleepTimeUs = 1000;
 
+    // todo CRC calculation
     framebuf->crc_16 = 33487;
+
+    init_transceiver_state(lifi_dev);
 
     lifi_send_bits(lifi_dev, sizeof(framebuf->preamble),&framebuf->preamble);
     lifi_send_bits(lifi_dev, sizeof(framebuf->len),&framebuf->len);
@@ -406,4 +408,57 @@ void lifi_send_frame(lifi_t* lifi_dev){
     framebuf->pos = 0;
     pwm_set(device, channel, 0);     // turn off pwm
     gpio_clear(DATA_SENDER_PIN);
+}
+void read_store_bit(lifi_t* lifi_dev, uint8_t* storage_byte, uint8_t bit_to_read)
+{
+    if (gpio_read(lifi_dev->params.input_pin) == 0) {
+        gpio_set(BIT_INTERPRETATION_PIN);
+        *storage_byte |= 1 << bit_to_read;
+    }
+    else {
+        gpio_clear(BIT_INTERPRETATION_PIN);
+        *storage_byte &= ~(1 << bit_to_read);
+    }
+}
+
+void lifi_preamble_sync(lifi_t* lifi_dev){
+    const uint8_t expectedPreambleFlanks = 15; // we end at T/2
+    static uint8_t preambleFlankCounter = 0;
+    preambleFlankCounter++;
+    lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
+
+    if (transceiver_state->current_frame_part == e_first_receive) {
+        transceiver_state->lastReceive = xtimer_now();
+        transceiver_state->meanHalfClockTicks = 0;
+        transceiver_state->min_tolerated_half_clock.ticks32 = 0;
+        transceiver_state->max_tolerated_half_clock.ticks32 = 0;
+        preambleFlankCounter = 0;
+        transceiver_state->current_frame_part = e_preamble;
+    }
+    else {
+        xtimer_ticks32_t timediff = xtimer_diff(xtimer_now(), transceiver_state->lastReceive);
+        transceiver_state->meanHalfClockTicks += (float)timediff.ticks32 / (float)expectedPreambleFlanks;
+        transceiver_state->lastReceive = xtimer_now();
+
+        if (preambleFlankCounter >= expectedPreambleFlanks -1) {
+            transceiver_state->lastHalfEdge = xtimer_now();
+            transceiver_state->current_frame_part = e_len;
+            transceiver_state->min_tolerated_half_clock.ticks32 = (uint32_t)(0.6 * transceiver_state->meanHalfClockTicks);
+            transceiver_state->max_tolerated_half_clock.ticks32 = (uint32_t)(1.4 * transceiver_state->meanHalfClockTicks);
+            transceiver_state->previousStateHigh = gpio_read(lifi_dev->params.input_pin) != 0;
+        }
+    }
+}
+
+void init_transceiver_state(lifi_t *lifi_dev) {
+    lifi_dev->transceiver_state.min_tolerated_half_clock.ticks32 = 0;
+    lifi_dev->transceiver_state.max_tolerated_half_clock.ticks32 = 0;
+    lifi_dev->transceiver_state.current_frame_part = e_first_receive;
+    lifi_dev->transceiver_state.previousStateHigh = false;
+    lifi_dev->transceiver_state.meanHalfClockTicks = 0;
+    lifi_dev->transceiver_state.lastReceive.ticks32 = 0 ;
+    lifi_dev->transceiver_state.lastHalfEdge.ticks32 = 0;
+    lifi_dev->transceiver_state.currentBit = 7;
+    lifi_dev->transceiver_state.currentByte = 0;
+    lifi_dev->transceiver_state.high_bit_counter = 0;
 }

@@ -22,6 +22,13 @@
 #include "net/netdev.h"
 #include "lifi.h"
 
+#define FULL_EDGES_DROP_PIN GPIO_PIN(PORT_F, 15)
+#define BIT_INTERPRETATION_PIN GPIO_PIN(PORT_G, 14)
+#define TIMING_ISSUE_PIN GPIO_PIN(PORT_B, 8)
+#define RECEIVE_INTERRUPT GPIO_PIN(PORT_B, 9)
+#define CLOCK_PIN GPIO_PIN(PORT_E, 13)
+#define DATA_SENDER_PIN GPIO_PIN(PORT_E, 11)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -42,6 +49,10 @@ void lifi_send_frame(lifi_t* lifi_dev);
  * @post    @p dev is still acquired, the caller has to release it
  */
 void lifi_enter_rx_mode(lifi_t *dev);
+
+void read_store_bit(lifi_t* lifi_dev, uint8_t* storage_byte, uint8_t bit_to_read);
+void lifi_preamble_sync(lifi_t* lifi_dev);
+void init_transceiver_state(lifi_t* lifi_dev);
 
 #ifdef __cplusplus
 }
