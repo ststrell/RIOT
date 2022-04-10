@@ -27,6 +27,7 @@
 #define RESOLUTION 255
 #define HIGH_GAIN (RESOLUTION / 2)
 #define LOW_GAIN 0
+#define SLEEP_TIME_US 1000
 
 /* Use NETDEV_EVENT_ISR to indicate that no event needs to be passed to upper
  * layer at end of ISR, as ISR will never need this event
@@ -347,42 +348,67 @@ static void send_double_edge(pwm_t device, uint8_t channel,uint16_t sleepTimeUs,
     xtimer_usleep(sleepTimeUs / 2);
 }
 
+static void send_high_bit(lifi_t* lifi_dev){
+    uint8_t channel = lifi_dev->params.output_pwm_device_channel;
+    pwm_t device = lifi_dev->params.output_pwm_device;
+    lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
+
+    gpio_set(DATA_SENDER_PIN);
+    if (transceiver_state->previousStateHigh) {
+        send_double_edge(device, channel, SLEEP_TIME_US, HIGH_GAIN);
+    }
+    else {
+        send_single_edge(device, channel, SLEEP_TIME_US, HIGH_GAIN);
+    }
+    transceiver_state->previousStateHigh = true;
+}
+
+static void send_low_bit(lifi_t* lifi_dev){
+    uint8_t channel = lifi_dev->params.output_pwm_device_channel;
+    pwm_t device = lifi_dev->params.output_pwm_device;
+    lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
+
+    if (transceiver_state->previousStateHigh) {
+        send_single_edge(device, channel, SLEEP_TIME_US, LOW_GAIN);
+    }
+    else {
+        send_double_edge(device, channel, SLEEP_TIME_US, LOW_GAIN);
+    }
+    transceiver_state->previousStateHigh = false;
+}
+
+
 static void lifi_send_bits(lifi_t* lifi_dev,uint16_t num_bytes, uint8_t* bytes){
-    const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
-    const pwm_t device = lifi_dev->params.output_pwm_device;
-    lifi_framebuf_t * framebuf = &lifi_dev->output_buf;
-
-    const uint16_t sleepTimeUs = 1000;
-
-    static bool oldStateHigh = false;
+    lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
 
     for(uint16_t byte = 0; byte < num_bytes; byte++){
         for (int8_t bit = 7; bit >= 0; bit--) {
-            gpio_toggle(CLOCK_PIN);
             // IEEE 802.3 rising edge for logic 1
             if ((bytes[byte] >> bit) & 0b1) {
                 gpio_set(DATA_SENDER_PIN);
-                if (oldStateHigh) {
-                    send_double_edge(device, channel, sleepTimeUs, HIGH_GAIN);
+                if(transceiver_state->current_frame_part != e_preamble && transceiver_state->high_bit_counter >= 7){
+                    // send a stuffing zero bit, to avoid preamble duplication
+            gpio_toggle(CLOCK_PIN);
+                    send_low_bit(lifi_dev);
+                    transceiver_state->high_bit_counter = 0;
                 }
-                else {
-                    send_single_edge(device, channel, sleepTimeUs, HIGH_GAIN);
-                }
-                oldStateHigh = true;
+                transceiver_state->high_bit_counter++;
+                send_high_bit(lifi_dev);
             }
             else {
                 // IEEE 802.3 falling edge for logic 0
                 gpio_clear(DATA_SENDER_PIN);
-                if (oldStateHigh) {
-                    send_single_edge(device, channel, sleepTimeUs, LOW_GAIN);
+                if(transceiver_state->current_frame_part != e_preamble && transceiver_state->high_bit_counter >= 7){
+            gpio_toggle(CLOCK_PIN);
+                    // sent 7 high bits, need so send a stuffing zero bit, even though the next bit would be zero anyway.
+                    // Receiver does not know that when receiving
+                    send_low_bit(lifi_dev);
                 }
-                else {
-                    send_double_edge(device, channel, sleepTimeUs, LOW_GAIN);
-                }
-                oldStateHigh = false;
+                send_low_bit(lifi_dev);
+                transceiver_state->high_bit_counter = 0;
             }
+            lifi_dev->output_buf.pos++;
         }
-        framebuf->pos++;
     }
 }
 
@@ -400,24 +426,42 @@ void lifi_send_frame(lifi_t* lifi_dev){
 
     init_transceiver_state(lifi_dev);
 
+    lifi_dev->transceiver_state.current_frame_part = e_preamble;
     lifi_send_bits(lifi_dev, sizeof(framebuf->preamble),&framebuf->preamble);
+    lifi_dev->transceiver_state.current_frame_part = e_len;
     lifi_send_bits(lifi_dev, sizeof(framebuf->len),&framebuf->len);
+    lifi_dev->transceiver_state.current_frame_part = e_payload;
     lifi_send_bits(lifi_dev, framebuf->len,framebuf->payload);
+    lifi_dev->transceiver_state.current_frame_part = e_crc16;
     lifi_send_bits(lifi_dev, sizeof(framebuf->crc_16), (uint8_t *) &framebuf->crc_16);
 
     framebuf->pos = 0;
     pwm_set(device, channel, 0);     // turn off pwm
+    lifi_dev->transceiver_state.current_frame_part = e_first_receive;
     gpio_clear(DATA_SENDER_PIN);
 }
 void read_store_bit(lifi_t* lifi_dev, uint8_t* storage_byte, uint8_t bit_to_read)
 {
+    // todo universal high/low edge interpretation depending on transceiver type
     if (gpio_read(lifi_dev->params.input_pin) == 0) {
-        gpio_set(BIT_INTERPRETATION_PIN);
-        *storage_byte |= 1 << bit_to_read;
+        // got high bit
+         gpio_set(BIT_INTERPRETATION_PIN);
+         lifi_dev->transceiver_state.high_bit_counter++;
+         lifi_dev->transceiver_state.currentBit--;
+         *storage_byte |= 1 << bit_to_read;
     }
     else {
-        gpio_clear(BIT_INTERPRETATION_PIN);
-        *storage_byte &= ~(1 << bit_to_read);
+        // got low bit
+
+        if(lifi_dev->transceiver_state.high_bit_counter >= 7){
+            // discard stuffing bit
+        } else {
+            gpio_clear(BIT_INTERPRETATION_PIN);
+            lifi_dev->transceiver_state.currentBit--;
+            *storage_byte &= ~(1 << bit_to_read);
+        }
+
+        lifi_dev->transceiver_state.high_bit_counter = 0;
     }
 }
 
@@ -446,6 +490,7 @@ void lifi_preamble_sync(lifi_t* lifi_dev){
             transceiver_state->min_tolerated_half_clock.ticks32 = (uint32_t)(0.6 * transceiver_state->meanHalfClockTicks);
             transceiver_state->max_tolerated_half_clock.ticks32 = (uint32_t)(1.4 * transceiver_state->meanHalfClockTicks);
             transceiver_state->previousStateHigh = gpio_read(lifi_dev->params.input_pin) != 0;
+            transceiver_state->high_bit_counter = 7;
         }
     }
 }

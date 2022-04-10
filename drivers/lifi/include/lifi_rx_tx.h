@@ -50,6 +50,13 @@ void lifi_send_frame(lifi_t* lifi_dev);
  */
 void lifi_enter_rx_mode(lifi_t *dev);
 
+/**
+ *
+ * @param lifi_dev
+ * @param storage_byte
+ * @param bit_to_read
+ * @return true if bit stored, false if bit discarded
+ */
 void read_store_bit(lifi_t* lifi_dev, uint8_t* storage_byte, uint8_t bit_to_read);
 void lifi_preamble_sync(lifi_t* lifi_dev);
 void init_transceiver_state(lifi_t* lifi_dev);

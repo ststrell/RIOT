@@ -71,7 +71,7 @@ void isr_callback_input_pin(void *_dev)
         transceiver_state->current_frame_part = e_first_receive;
         transceiver_state->currentByte = 0;
         transceiver_state->currentBit = 7;
-        transceiver_state->high_bit_counter = 0;
+        transceiver_state->high_bit_counter = 7;
     }
 
     // check if we have a timeout in e_len/e_payload/e_crc16 mode -> reset
@@ -80,7 +80,7 @@ void isr_callback_input_pin(void *_dev)
         transceiver_state->current_frame_part = e_first_receive;
         transceiver_state->currentByte = 0;
         transceiver_state->currentBit = 7;
-        transceiver_state->high_bit_counter = 0;
+        transceiver_state->high_bit_counter = 7;
     }
 
     // Sync to sender frequency
@@ -91,7 +91,7 @@ void isr_callback_input_pin(void *_dev)
     // receive data
     else {
         // first call here means, that preamble is done. Preamble finished with half period
-        // next interrupt can happen either at next full period or next half period, depends on the first byte to transfer
+        // next interrupt can happen either at next full period or next half period, depends on the first bit to transfer
 
         // calculate ticks diff between now and last half period receive, used to check if edge has to be dropped
         xtimer_ticks32_t timediff = xtimer_diff(xtimer_now(), transceiver_state->lastHalfEdge);
@@ -109,11 +109,11 @@ void isr_callback_input_pin(void *_dev)
 
             // check current frame part and currentByte to decide where to store the bit
             if(transceiver_state->current_frame_part == e_len) {
-                read_store_bit(lifi_dev,&lifi_dev->input_buf.len , transceiver_state->currentBit--);
+                read_store_bit(lifi_dev,&lifi_dev->input_buf.len , transceiver_state->currentBit);
             } else if(transceiver_state->current_frame_part == e_payload){
-                read_store_bit(lifi_dev,&lifi_dev->input_buf.payload[transceiver_state->currentByte-1] , transceiver_state->currentBit--);
+                read_store_bit(lifi_dev,&lifi_dev->input_buf.payload[transceiver_state->currentByte-1] , transceiver_state->currentBit);
             } else {
-                read_store_bit(lifi_dev,&(((uint8_t*)&lifi_dev->input_buf.crc_16)[transceiver_state->currentByte - lifi_dev->input_buf.len -1]) , transceiver_state->currentBit--);
+                read_store_bit(lifi_dev,&(((uint8_t*)&lifi_dev->input_buf.crc_16)[transceiver_state->currentByte - lifi_dev->input_buf.len -1]) , transceiver_state->currentBit);
             }
             if (transceiver_state->currentBit <= -1 ) {
                 if (transceiver_state->currentByte == 0){
@@ -125,9 +125,10 @@ void isr_callback_input_pin(void *_dev)
                 transceiver_state->currentByte++;
             }
             if (transceiver_state->currentByte == -1 + lifi_dev->input_buf.len + sizeof(lifi_dev->input_buf.len)+ sizeof(lifi_dev->input_buf.crc_16) && transceiver_state->currentBit == 0) {
-                for (int byte = 0; byte < lifi_dev->input_buf.len; ++byte) {
-                    printf("char: %c \n", lifi_dev->input_buf.payload[byte]);
-                }
+//                for (int byte = 0; byte < lifi_dev->input_buf.len; ++byte) {
+////                    printf("char: %c \n", lifi_dev->input_buf.payload[byte]);
+//                    printf("byte: %u \n", lifi_dev->input_buf.payload[byte]);
+//                }
                 puts("resetting");
                 printf("crc %u\n",lifi_dev->input_buf.crc_16);
                 transceiver_state->current_frame_part = e_first_receive;
