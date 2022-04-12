@@ -17,9 +17,11 @@
  * @}
  */
 
+#include <byteorder.h>
 #include "xtimer.h"
 #include "lifi.h"
 #include "lifi_rx_tx.h"
+#include "checksum/crc16_ccitt.h"
 
 #define ENABLE_DEBUG 0
 #include "debug.h"
@@ -368,6 +370,7 @@ static void send_low_bit(lifi_t* lifi_dev){
     pwm_t device = lifi_dev->params.output_pwm_device;
     lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
 
+    gpio_clear(DATA_SENDER_PIN);
     if (transceiver_state->previousStateHigh) {
         send_single_edge(device, channel, SLEEP_TIME_US, LOW_GAIN);
     }
@@ -383,12 +386,12 @@ static void lifi_send_bits(lifi_t* lifi_dev,uint16_t num_bytes, uint8_t* bytes){
 
     for(uint16_t byte = 0; byte < num_bytes; byte++){
         for (int8_t bit = 7; bit >= 0; bit--) {
+            gpio_toggle(CLOCK_PIN);
             // IEEE 802.3 rising edge for logic 1
             if ((bytes[byte] >> bit) & 0b1) {
                 gpio_set(DATA_SENDER_PIN);
                 if(transceiver_state->current_frame_part != e_preamble && transceiver_state->high_bit_counter >= 7){
                     // send a stuffing zero bit, to avoid preamble duplication
-            gpio_toggle(CLOCK_PIN);
                     send_low_bit(lifi_dev);
                     transceiver_state->high_bit_counter = 0;
                 }
@@ -399,7 +402,6 @@ static void lifi_send_bits(lifi_t* lifi_dev,uint16_t num_bytes, uint8_t* bytes){
                 // IEEE 802.3 falling edge for logic 0
                 gpio_clear(DATA_SENDER_PIN);
                 if(transceiver_state->current_frame_part != e_preamble && transceiver_state->high_bit_counter >= 7){
-            gpio_toggle(CLOCK_PIN);
                     // sent 7 high bits, need so send a stuffing zero bit, even though the next bit would be zero anyway.
                     // Receiver does not know that when receiving
                     send_low_bit(lifi_dev);
@@ -422,7 +424,12 @@ void lifi_send_frame(lifi_t* lifi_dev){
     gpio_init(CLOCK_PIN, GPIO_OUT);
 
     // todo CRC calculation
-    framebuf->crc_16 = 33487;
+
+    framebuf->crc_16 = crc16_ccitt_calc(framebuf->payload,framebuf->len);
+    printf("CRC outgoing: %u , len: %u \n", framebuf->crc_16, framebuf->len);
+    for (int pos = 0; pos < framebuf->len; ++pos) {
+        printf("%u",framebuf->payload[pos]);
+    }
 
     init_transceiver_state(lifi_dev);
 
@@ -433,6 +440,7 @@ void lifi_send_frame(lifi_t* lifi_dev){
     lifi_dev->transceiver_state.current_frame_part = e_payload;
     lifi_send_bits(lifi_dev, framebuf->len,framebuf->payload);
     lifi_dev->transceiver_state.current_frame_part = e_crc16;
+    framebuf->crc_16 = htons(framebuf->crc_16);
     lifi_send_bits(lifi_dev, sizeof(framebuf->crc_16), (uint8_t *) &framebuf->crc_16);
 
     framebuf->pos = 0;

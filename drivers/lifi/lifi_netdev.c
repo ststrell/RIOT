@@ -22,6 +22,7 @@
 #include <string.h>
 #include <lifi_rx_tx.h>
 #include <cc1xxx_common.h>
+#include "checksum/crc16_ccitt.h"
 
 #include "assert.h"
 #include "iolist.h"
@@ -59,6 +60,12 @@ const netdev_driver_t lifi_driver = {
 };
 
 #define TIMEOUT_TICKS xtimer_ticks_from_usec(10000)
+
+// general todo
+// todo implement a generic reset function
+// todo implement states
+// todo think about thread/state/ISR communication
+
 
 void isr_callback_input_pin(void *_dev)
 {
@@ -130,7 +137,16 @@ void isr_callback_input_pin(void *_dev)
 //                    printf("byte: %u \n", lifi_dev->input_buf.payload[byte]);
 //                }
                 puts("resetting");
-                printf("crc %u\n",lifi_dev->input_buf.crc_16);
+                uint16_t crc_16 = crc16_ccitt_calc(lifi_dev->input_buf.payload,lifi_dev->input_buf.len);
+                lifi_dev->input_buf.crc_16 = ntohs(lifi_dev->input_buf.crc_16);
+                if (crc_16 != lifi_dev->input_buf.crc_16){
+                    puts("crc16 did not match!");
+                    for (int pos = 0; pos < lifi_dev->input_buf.len; ++pos) {
+                        printf("%u",lifi_dev->input_buf.payload[pos]);
+                    }
+                    printf("CRC ingoing: %u , len: %u \n", lifi_dev->input_buf.crc_16, lifi_dev->input_buf.len);
+                    //todo errorhandling
+                }
                 transceiver_state->current_frame_part = e_first_receive;
                 transceiver_state->currentByte = 0;
                 transceiver_state->currentBit = 7;
@@ -276,6 +292,7 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
 static int lifi_get(netdev_t *netdev, netopt_t opt,
                     void *val, size_t max_len)
 {
+    // todo implement more options
     DEBUG("Entering lifi_get function\n");
     lifi_t *dev = (lifi_t *)netdev;
 
@@ -299,77 +316,6 @@ static int lifi_get(netdev_t *netdev, netopt_t opt,
     }
 
     return -ENOTSUP;
-//    cc110x_t *dev = (cc110x_t *)netdev;
-//
-//    (void)max_len;  /* only used in assert() */
-//    switch (opt) {
-//    case NETOPT_DEVICE_TYPE:
-//        assert(max_len == sizeof(uint16_t));
-//        *((uint16_t *)val) = NETDEV_TYPE_CC110X;
-//        return sizeof(uint16_t);
-//    case NETOPT_PROTO:
-//        assert(max_len == sizeof(gnrc_nettype_t));
-//        *((gnrc_nettype_t *)val) = CC110X_DEFAULT_PROTOCOL;
-//        return sizeof(gnrc_nettype_t);
-//    case NETOPT_MAX_PDU_SIZE:
-//        assert(max_len == sizeof(uint16_t));
-//        *((uint16_t *)val) = CC110X_MAX_FRAME_SIZE - sizeof(cc1xxx_l2hdr_t);
-//        return sizeof(uint16_t);
-//    case NETOPT_ADDR_LEN:
-//    /* falls through */
-//    case NETOPT_SRC_LEN:
-//        assert(max_len == sizeof(uint16_t));
-//        *((uint16_t *)val) = CC1XXX_ADDR_SIZE;
-//        return sizeof(uint16_t);
-//    case NETOPT_ADDRESS:
-//        assert(max_len >= CC1XXX_ADDR_SIZE);
-//        *((uint8_t *)val) = dev->addr;
-//        return CC1XXX_ADDR_SIZE;
-//    case NETOPT_CHANNEL:
-//        assert(max_len == sizeof(uint16_t));
-//        *((uint16_t *)val) = dev->channel;
-//        return sizeof(uint16_t);
-//    case NETOPT_TX_POWER:
-//        assert(max_len == sizeof(uint16_t));
-//        *((uint16_t *)val) = dbm_from_tx_power[dev->tx_power];
-//        return sizeof(uint16_t);
-//    case NETOPT_PROMISCUOUSMODE:
-//        assert(max_len == sizeof(netopt_enable_t));
-//        return cc110x_get_promiscuous_mode(dev, val);
-//    case NETOPT_STATE:
-//        assert(max_len == sizeof(netopt_state_t));
-//        {
-//            netopt_state_t *state = val;
-//            switch (dev->state) {
-//            case CC110X_STATE_RECEIVING:
-//            case CC110X_STATE_FRAME_READY:
-//            case CC110X_STATE_RXFIFO_OVERFLOW:
-//                *state = NETOPT_STATE_RX;
-//                break;
-//            case CC110X_STATE_IDLE:
-//                *state = NETOPT_STATE_STANDBY;
-//                break;
-//            case CC110X_STATE_OFF:
-//                *state = NETOPT_STATE_SLEEP;
-//                break;
-//            case CC110X_STATE_TX_MODE:
-//            case CC110X_STATE_TX_COMPLETING:
-//            case CC110X_STATE_TXFIFO_UNDERFLOW:
-//                *state = NETOPT_STATE_TX;
-//                break;
-//            case CC110X_STATE_RX_MODE:
-//                *state = NETOPT_STATE_IDLE;
-//                break;
-//            default:
-//                *state = NETOPT_STATE_RESET;
-//                break;
-//            }
-//        }
-//        break;
-//    default:
-//        break;
-//    }
-//    return -ENOTSUP;
 }
 
 /**
@@ -380,6 +326,7 @@ static int lifi_get(netdev_t *netdev, netopt_t opt,
  */
 static int lifi_set_addr(lifi_t *dev, uint8_t addr)
 {
+    // todo implement address setter
     (void)dev;
     (void)addr;
 //    cc110x_acquire(dev);
@@ -390,6 +337,7 @@ static int lifi_set_addr(lifi_t *dev, uint8_t addr)
     return 1;
 }
 
+// @todo think about implementing an "promiscuous" address filter
 ///**
 // * @brief   Enables/disables the CC110x's address filter
 // * @param   dev     Transceiver to turn promiscuous mode on/off
@@ -417,45 +365,17 @@ static int lifi_set_addr(lifi_t *dev, uint8_t addr)
 static int lifi_set(netdev_t *netdev, netopt_t opt,
                     const void *val, size_t len)
 {
+    // todo implement setter according to getters
     (void)len;
-    (void)netdev;
+
     (void)opt;
-    (void)val;
-    return 1;
-//    cc110x_t *dev = (cc110x_t *)netdev;
-//
-//    switch (opt) {
-//    case NETOPT_ADDRESS:
-//        assert(len == CC1XXX_ADDR_SIZE);
-//        return cc110x_set_addr(dev, *((uint8_t *)val));
-//    case NETOPT_CHANNEL:
-//    {
-//        assert(len == sizeof(uint16_t));
-//        int retval;
-//        uint16_t channel = *((uint16_t *)val);
-//        if (channel >= CC110X_MAX_CHANNELS) {
-//            return -EINVAL;
-//        }
-//        if ((retval = cc110x_set_channel(dev, (uint8_t)channel))) {
-//            return retval;
-//        }
-//    }
-//        return sizeof(uint16_t);
-//    case NETOPT_TX_POWER:
-//    {
-//        assert(len == sizeof(int16_t));
-//        int16_t dbm = *((int16_t *)val);
-//        cc110x_tx_power_t power = CC110X_TX_POWER_MINUS_30_DBM;
-//        for ( ; power < CC110X_TX_POWER_PLUS_10_DBM; power++) {
-//            if ((int16_t)tx_power_from_dbm[power] >= dbm) {
-//                break;
-//            }
-//        }
-//        if (cc110x_set_tx_power(dev, power)) {
-//            return -EINVAL;
-//        }
-//    }
-//        return sizeof(uint16_t);
+    lifi_t *lifi_dev = (lifi_t *)netdev;
+
+    switch (opt) {
+    case NETOPT_ADDRESS:
+        assert(len == CC1XXX_ADDR_SIZE);
+        lifi_dev->addr = *(uint8_t *)val;
+        return 0;
 //    case NETOPT_PROMISCUOUSMODE:
 //        assert(len == sizeof(netopt_enable_t));
 //        return cc110x_set_promiscuous_mode(dev, *((const netopt_enable_t *)val));
@@ -474,7 +394,7 @@ static int lifi_set(netdev_t *netdev, netopt_t opt,
 //            return -ENOTSUP;
 //        }
 //        break;
-//    default:
-//        return -ENOTSUP;
-//    }
+    default:
+        return -ENOTSUP;
+    }
 }
