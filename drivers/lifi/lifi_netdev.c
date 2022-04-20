@@ -147,6 +147,9 @@ void isr_callback_input_pin(void *_dev)
                     printf("CRC ingoing: %u , len: %u \n", lifi_dev->input_buf.crc_16, lifi_dev->input_buf.len);
                     //todo errorhandling
                 }
+                else {
+                    netdev_trigger_event_isr(&lifi_dev->netdev);
+                }
                 transceiver_state->current_frame_part = e_first_receive;
                 transceiver_state->currentByte = 0;
                 transceiver_state->currentBit = 7;
@@ -213,6 +216,7 @@ static int lifi_init(netdev_t *netdev)
 
 static int lifi_recv(netdev_t *netdev, void *buf, size_t len, void *info)
 {
+    // todo: test this
     (void)info; // no receive information available
     lifi_t *dev = (lifi_t *)netdev;
 

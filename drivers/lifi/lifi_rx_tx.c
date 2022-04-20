@@ -38,59 +38,9 @@
 
 void lifi_isr(netdev_t *netdev)
 {
-    (void) netdev;
-//    cc110x_t *dev = (cc110x_t *)netdev;
-//    /* We don't want to create events while device descriptor is acquired, to
-//     * prevent a dead lock. (Currently e.g. on NETDEV_EVENT_RX_COMPLETE the
-//     * upper layer will immediately call netdev_driver_t::recv(), which in
-//     * turn wants to operate on the device descriptor. We could rely on this
-//     * behaviour by skipping cc110x_acquire() there, but the driver would break
-//     * when upper layer behaviour is changed. By moving the event notification
-//     * at the end of the ISR (end after cc110x_release()), the driver becomes
-//     * agnostic to which behaviour the upper layer implements.)
-//     */
-//    netdev_event_t post_isr_event = NETDEV_NO_EVENT;
-//
-//    cc110x_acquire(dev);
-//
-//    /* Disable IRQs in a coarse manner, instead of doing so any time the
-//     * IOCFGx configuration registers are changed. (This should be less
-//     * bug prone.)
-//     */
-//    gpio_irq_disable(dev->params.gdo0);
-//    gpio_irq_disable(dev->params.gdo2);
-//
-//    switch (dev->state) {
-//        case CC110X_STATE_RX_MODE:
-//            if (gpio_read(dev->params.gdo0) || gpio_read(dev->params.gdo2)) {
-//                dev->state = CC110X_STATE_RECEIVING;
-//                dev->buf.pos = dev->buf.len = 0;
-//            }
-//            break;
-//        case CC110X_STATE_RECEIVING:
-//            post_isr_event = cc110x_rx_continue(dev);
-//            break;
-//        case CC110X_STATE_TX_MODE:
-//            post_isr_event = cc110x_tx_continue(dev);
-//            break;
-//        case CC110X_STATE_TX_COMPLETING:
-//            post_isr_event = cc110x_tx_done(dev);
-//            break;
-//        default:
-//            DEBUG("[cc110x] ISR: CRITICAL ERROR: No interrupt expected "
-//                  "for current state\n");
-//            /* Go back to RX and pray that solved the problem */
-//            cc110x_enter_rx_mode(dev);
-//    }
-//
-//    /* Re-enable IRQs again, unless device state */
-//    gpio_irq_enable(dev->params.gdo0);
-//    gpio_irq_enable(dev->params.gdo2);
-//    cc110x_release(dev);
-//    /* Pass event to uper layer, if needed */
-//    if (post_isr_event != NETDEV_NO_EVENT) {
-//        dev->netdev.event_callback(&dev->netdev, post_isr_event);
-//    }
+    lifi_t* lifi_dev = (lifi_t* )netdev;
+    /* Pass event to upper layer, if needed */
+    lifi_dev->netdev.event_callback(&lifi_dev->netdev, NETDEV_EVENT_RX_COMPLETE);
 }
 
 static void send_single_edge(pwm_t device, uint8_t channel,uint16_t sleepTimeUs, uint8_t gain){
