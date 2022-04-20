@@ -185,6 +185,7 @@ static int lifi_init(netdev_t *netdev)
     gpio_init(RECEIVE_INTERRUPT,GPIO_OUT);
 
     init_transceiver_state(lifi_dev);
+    lifi_dev->baud = 50;
 
 
     // Todo: any mutexes for ISR like in CC1101?

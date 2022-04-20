@@ -43,3 +43,8 @@ int lifi_setup(lifi_t *dev, const lifi_params_t *params, uint8_t index)
     netdev_register(&dev->netdev, NETDEV_CC110X, index);
     return 0;
 }
+
+int lifi_set_baud(lifi_t *dev, uint16_t baud) {
+    dev->baud = baud;
+    return 0;
+}

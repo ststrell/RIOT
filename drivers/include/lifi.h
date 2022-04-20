@@ -346,9 +346,9 @@ typedef struct{
 typedef struct {
     netdev_t netdev;                    /**< RIOT's interface to this driver */
     uint8_t addr;                       /**< Layer 2 address of this device */
+    uint16_t baud;
     /* Keep above in sync with cc1xx_t members, as they must overlap! */
     lifi_state_t state;               /**< State of the transceiver */
-    uint8_t channel;                    /**< Currently tuned (virtual) channel */
     /* Struct packing:  addr, state, tx_power and channel add up to 32 bit */
     lifi_params_t params;             /**< Configuration of the driver */
     lifi_framebuf_t output_buf;              /**< Temporary frame buffer */
@@ -379,6 +379,8 @@ typedef struct {
  * @retval  -EINVAL @p dev or @p params is `NULL`, or @p params is invalid
  */
 int lifi_setup(lifi_t *dev, const lifi_params_t *params, uint8_t index);
+
+int lifi_set_baud(lifi_t* dev, uint16_t baud);
 
 #ifdef __cplusplus
 }

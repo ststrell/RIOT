@@ -28,6 +28,7 @@
 
 #define RESOLUTION 255
 #define HIGH_GAIN (RESOLUTION / 2)
+#define BAUD_TO_US_PERIOD(baud) (1000000/(baud*8))
 #define LOW_GAIN 0
 #define SLEEP_TIME_US 1000
 
@@ -43,44 +44,48 @@ void lifi_isr(netdev_t *netdev)
     lifi_dev->netdev.event_callback(&lifi_dev->netdev, NETDEV_EVENT_RX_COMPLETE);
 }
 
-static void send_single_edge(pwm_t device, uint8_t channel,uint16_t sleepTimeUs, uint8_t gain){
-    xtimer_usleep(sleepTimeUs / 2);
+static void send_single_edge(lifi_t* lifi_dev, uint8_t gain){
+    uint8_t channel = lifi_dev->params.output_pwm_device_channel;
+    pwm_t device = lifi_dev->params.output_pwm_device;
+    uint16_t baud = lifi_dev->baud;
+
+    xtimer_usleep(BAUD_TO_US_PERIOD(baud)/2);
     pwm_set(device, channel, gain);
-    xtimer_usleep(sleepTimeUs / 2);
+    xtimer_usleep(BAUD_TO_US_PERIOD(baud)/2);
 }
-static void send_double_edge(pwm_t device, uint8_t channel,uint16_t sleepTimeUs, uint8_t gain){
+static void send_double_edge(lifi_t* lifi_dev, uint8_t gain){
+    uint8_t channel = lifi_dev->params.output_pwm_device_channel;
+    pwm_t device = lifi_dev->params.output_pwm_device;
+    uint16_t baud = lifi_dev->baud;
+
     pwm_set(device, channel, gain == HIGH_GAIN ? LOW_GAIN : HIGH_GAIN);
-    xtimer_usleep(sleepTimeUs / 2);
+    xtimer_usleep(BAUD_TO_US_PERIOD(baud)/2);
     pwm_set(device, channel, gain == HIGH_GAIN ? HIGH_GAIN :LOW_GAIN);
-    xtimer_usleep(sleepTimeUs / 2);
+    xtimer_usleep(BAUD_TO_US_PERIOD(baud)/2);
 }
 
 static void send_high_bit(lifi_t* lifi_dev){
-    uint8_t channel = lifi_dev->params.output_pwm_device_channel;
-    pwm_t device = lifi_dev->params.output_pwm_device;
     lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
 
     gpio_set(DATA_SENDER_PIN);
     if (transceiver_state->previousStateHigh) {
-        send_double_edge(device, channel, SLEEP_TIME_US, HIGH_GAIN);
+        send_double_edge(lifi_dev, HIGH_GAIN);
     }
     else {
-        send_single_edge(device, channel, SLEEP_TIME_US, HIGH_GAIN);
+        send_single_edge(lifi_dev, HIGH_GAIN);
     }
     transceiver_state->previousStateHigh = true;
 }
 
 static void send_low_bit(lifi_t* lifi_dev){
-    uint8_t channel = lifi_dev->params.output_pwm_device_channel;
-    pwm_t device = lifi_dev->params.output_pwm_device;
     lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
 
     gpio_clear(DATA_SENDER_PIN);
     if (transceiver_state->previousStateHigh) {
-        send_single_edge(device, channel, SLEEP_TIME_US, LOW_GAIN);
+        send_single_edge(lifi_dev, LOW_GAIN);
     }
     else {
-        send_double_edge(device, channel, SLEEP_TIME_US, LOW_GAIN);
+        send_double_edge(lifi_dev, LOW_GAIN);
     }
     transceiver_state->previousStateHigh = false;
 }
