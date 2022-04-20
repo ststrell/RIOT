@@ -175,16 +175,10 @@ void lifi_send_frame(lifi_t* lifi_dev){
     lifi_framebuf_t * framebuf = &lifi_dev->output_buf;
 
     gpio_init(DATA_SENDER_PIN, GPIO_OUT);
-
     gpio_init(CLOCK_PIN, GPIO_OUT);
 
-    // todo CRC calculation
-
     framebuf->crc_16 = crc16_ccitt_calc(framebuf->payload,framebuf->len);
-    printf("CRC outgoing: %u , len: %u \n", framebuf->crc_16, framebuf->len);
-    for (int pos = 0; pos < framebuf->len; ++pos) {
-        printf("%u",framebuf->payload[pos]);
-    }
+    DEBUG("[LiFi] lifi_rx_tx:lifi_send_frame: CRC outgoing: %u , len: %u \n", framebuf->crc_16, framebuf->len);
 
     init_transceiver_state(lifi_dev);
 

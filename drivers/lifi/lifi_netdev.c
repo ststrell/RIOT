@@ -213,46 +213,33 @@ static int lifi_init(netdev_t *netdev)
 
 static int lifi_recv(netdev_t *netdev, void *buf, size_t len, void *info)
 {
-    (void)netdev;
-    (void)buf;
-    (void)len;
-    (void)info;
-    return 1;
-//    cc110x_t *dev = (cc110x_t *)netdev;
-//
-//    /* Call to cc110x_enter_rx_mode() will clear dev->buf.len, so back up it first */
-//    int size = dev->buf.len;
-//
-//    cc110x_acquire(dev);
-//
-//    /* Copy RX info on last frame (if requested) */
-//    if (info != NULL) {
-//        *((cc1xxx_rx_info_t *)info) = dev->rx_info;
-//    }
-//
-//    if (!buf) {
-//        /* Get the size of the frame; if len > 0 then also drop the frame */
-//        if (len > 0) {
-//            /* Drop frame requested */
-//            cc110x_enter_rx_mode(dev);
-//        }
-//        cc110x_release(dev);
-//        return size;
-//    }
-//
-//    if (len < (size_t)size) {
-//        /* Drop frame and return -ENOBUFS */
-//        cc110x_enter_rx_mode(dev);
-//        cc110x_release(dev);
-//        return -ENOBUFS;
-//    }
-//
-//    memcpy(buf, dev->buf.data, (size_t)size);
-//
-//    cc110x_enter_rx_mode(dev);
-//    cc110x_release(dev);
-//    return size;
+    (void)info; // no receive information available
+    lifi_t *dev = (lifi_t *)netdev;
+
+    /* Call to cc110x_enter_rx_mode() will clear dev->buf.len, so back up it first */
+    int size = dev->input_buf.len;
+
+    if (!buf) {
+        /* Get the size of the frame; if len > 0 then also drop the frame */
+        if (len > 0) {
+            /* Drop frame requested */
+            dev->input_buf.len = 0;
+        }
+        return size;
+    }
+
+    if (len < (size_t)size) {
+        /* Drop frame and return -ENOBUFS */
+        dev->input_buf.len = 0;
+        return -ENOBUFS;
+    }
+
+    memcpy(buf, dev->input_buf.payload, (size_t)size);
+
+    dev->input_buf.len = 0; /* frame collected, delete it */
+    return size;
 }
+
 static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
 {
     lifi_t *lifi_dev = (lifi_t *)netdev;
