@@ -144,7 +144,7 @@ void isr_callback_input_pin(void *_dev)
                     for (int pos = 0; pos < lifi_dev->input_buf.len; ++pos) {
                         printf("%u",lifi_dev->input_buf.payload[pos]);
                     }
-                    printf("CRC ingoing: %u , len: %u \n", lifi_dev->input_buf.crc_16, lifi_dev->input_buf.len);
+                    printf("\nCRC ingoing: %u , len: %u \n", lifi_dev->input_buf.crc_16, lifi_dev->input_buf.len);
                     //todo errorhandling
                 }
                 else {
@@ -309,49 +309,6 @@ static int lifi_get(netdev_t *netdev, netopt_t opt,
     return -ENOTSUP;
 }
 
-/**
- * @brief   Set the given address as the device's layer 2 address
- *
- * @param   dev     Device descripter of the transceiver
- * @param   addr    Address to set
- */
-static int lifi_set_addr(lifi_t *dev, uint8_t addr)
-{
-    // todo implement address setter
-    (void)dev;
-    (void)addr;
-//    cc110x_acquire(dev);
-//
-//    dev->addr = addr;
-//    cc110x_write(dev, CC110X_REG_ADDR, addr);
-//    cc110x_release(dev);
-    return 1;
-}
-
-// @todo think about implementing an "promiscuous" address filter
-///**
-// * @brief   Enables/disables the CC110x's address filter
-// * @param   dev     Transceiver to turn promiscuous mode on/off
-// * @param   enable  Whether to enable or disable promiscuous mode
-// *
-// * @return  Returns the size of @ref netopt_enable_t to confirm with the API
-// *          in @ref netdev_driver_t::set
-// */
-//static int cc110x_set_promiscuous_mode(cc110x_t *dev, netopt_enable_t enable)
-//{
-//    cc110x_acquire(dev);
-//
-//    uint8_t pktctrl1 = CC110X_PKTCTRL1_VALUE;
-//    if (enable == NETOPT_ENABLE) {
-//        pktctrl1 |= CC110X_PKTCTRL1_ADDR_ALL;
-//    }
-//    else {
-//        pktctrl1 |= CC110X_PKTCTRL1_ADDR_MATCH;
-//    }
-//    cc110x_write(dev, CC110X_REG_PKTCTRL1, pktctrl1);
-//    cc110x_release(dev);
-//    return sizeof(netopt_enable_t);
-//}
 
 static int lifi_set(netdev_t *netdev, netopt_t opt,
                     const void *val, size_t len)
@@ -367,6 +324,7 @@ static int lifi_set(netdev_t *netdev, netopt_t opt,
         assert(len == CC1XXX_ADDR_SIZE);
         lifi_dev->addr = *(uint8_t *)val;
         return 0;
+//    @todo think about implementing an "promiscuous" address filter
 //    case NETOPT_PROMISCUOUSMODE:
 //        assert(len == sizeof(netopt_enable_t));
 //        return cc110x_set_promiscuous_mode(dev, *((const netopt_enable_t *)val));
