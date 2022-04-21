@@ -139,9 +139,13 @@ void isr_callback_input_pin(void *_dev)
                     transceiver_state->currentBit = 7;
                     transceiver_state->currentByte++;
                 }
-                if (transceiver_state->currentByte == -1 + lifi_dev->input_buf.len + sizeof(lifi_dev->input_buf.len) +
-                                                      sizeof(lifi_dev->input_buf.crc_16) &&
-                    transceiver_state->currentBit == 0) {
+                if (transceiver_state->currentByte ==
+                -1
+                + lifi_dev->input_buf.len
+                + sizeof(lifi_dev->input_buf.len)
+                + sizeof(lifi_dev->input_buf.crc_16)
+                + sizeof(lifi_dev->input_buf.layer2_hdr)
+                && transceiver_state->currentBit == 0) {
 //                for (int byte = 0; byte < lifi_dev->input_buf.len; ++byte) {
 ////                    printf("char: %c \n", lifi_dev->input_buf.payload[byte]);
 //                    printf("byte: %u \n", lifi_dev->input_buf.payload[byte]);
