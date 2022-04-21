@@ -141,6 +141,8 @@ void lifi_send_frame(lifi_t* lifi_dev){
     lifi_send_bits(lifi_dev, sizeof(framebuf->preamble),&framebuf->preamble);
     lifi_dev->transceiver_state.current_frame_part = e_len;
     lifi_send_bits(lifi_dev, sizeof(framebuf->len),&framebuf->len);
+    lifi_dev->transceiver_state.current_frame_part = e_layer2_header;
+    lifi_send_bits(lifi_dev, sizeof(framebuf->layer2_hdr), (uint8_t *) &framebuf->layer2_hdr);
     lifi_dev->transceiver_state.current_frame_part = e_payload;
     lifi_send_bits(lifi_dev, framebuf->len,framebuf->payload);
     lifi_dev->transceiver_state.current_frame_part = e_crc16;

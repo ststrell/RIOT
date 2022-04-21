@@ -114,24 +114,40 @@ void isr_callback_input_pin(void *_dev)
             transceiver_state->lastHalfEdge = xtimer_now();
             // edge is in expected half period timing
 
-            // check current frame part and currentByte to decide where to store the bit
-            if(transceiver_state->current_frame_part == e_len) {
-                read_store_bit(lifi_dev,&lifi_dev->input_buf.len , transceiver_state->currentBit);
-            } else if(transceiver_state->current_frame_part == e_payload){
-                read_store_bit(lifi_dev,&lifi_dev->input_buf.payload[transceiver_state->currentByte-1] , transceiver_state->currentBit);
-            } else {
-                read_store_bit(lifi_dev,&(((uint8_t*)&lifi_dev->input_buf.crc_16)[transceiver_state->currentByte - lifi_dev->input_buf.len -1]) , transceiver_state->currentBit);
-            }
-            if (transceiver_state->currentBit <= -1 ) {
-                if (transceiver_state->currentByte == 0){
-                    transceiver_state->current_frame_part = e_payload;
-                } else if(transceiver_state->currentByte == lifi_dev->input_buf.len){
-                    transceiver_state->current_frame_part = e_crc16;
+                // check current frame part and currentByte to decide where to store the bit
+                if (transceiver_state->current_frame_part == e_len) {
+                    read_store_bit(lifi_dev, &lifi_dev->input_buf.len, transceiver_state->currentBit);
+                } else if (transceiver_state->current_frame_part == e_layer2_header) {
+                    if (transceiver_state->currentByte == 1){
+                        read_store_bit(lifi_dev, (uint8_t*) &lifi_dev->input_buf.layer2_hdr.dest_addr, transceiver_state->currentBit);
+                    } else {
+                        read_store_bit(lifi_dev, (uint8_t*) &lifi_dev->input_buf.layer2_hdr.src_addr, transceiver_state->currentBit);
+                    }
+                } else if (transceiver_state->current_frame_part == e_payload) {
+                    read_store_bit(lifi_dev, &lifi_dev->input_buf.payload[transceiver_state->currentByte - 3],
+                                   transceiver_state->currentBit);
+                } else {
+                    read_store_bit(lifi_dev,
+                                   &(((uint8_t *) &lifi_dev->input_buf.crc_16)[transceiver_state->currentByte -
+                                                                               lifi_dev->input_buf.len - 1]),
+                                   transceiver_state->currentBit);
                 }
-                transceiver_state->currentBit = 7;
-                transceiver_state->currentByte++;
-            }
-            if (transceiver_state->currentByte == -1 + lifi_dev->input_buf.len + sizeof(lifi_dev->input_buf.len)+ sizeof(lifi_dev->input_buf.crc_16) && transceiver_state->currentBit == 0) {
+                if (transceiver_state->currentBit <= -1) {
+                    if (transceiver_state->current_frame_part == e_len) {
+                        transceiver_state->current_frame_part = e_layer2_header;
+                    }
+                    if (transceiver_state->currentByte == sizeof(lifi_dev->input_buf.layer2_hdr)) {
+                        transceiver_state->current_frame_part = e_payload;
+                    } else if (transceiver_state->currentByte == lifi_dev->input_buf.len
+                                + sizeof(lifi_dev->input_buf.layer2_hdr)) {
+                        transceiver_state->current_frame_part = e_crc16;
+                    }
+                    transceiver_state->currentBit = 7;
+                    transceiver_state->currentByte++;
+                }
+                if (transceiver_state->currentByte == -1 + lifi_dev->input_buf.len + sizeof(lifi_dev->input_buf.len) +
+                                                      sizeof(lifi_dev->input_buf.crc_16) &&
+                    transceiver_state->currentBit == 0) {
 //                for (int byte = 0; byte < lifi_dev->input_buf.len; ++byte) {
 ////                    printf("char: %c \n", lifi_dev->input_buf.payload[byte]);
 //                    printf("byte: %u \n", lifi_dev->input_buf.payload[byte]);
@@ -252,8 +268,8 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
     assert(netdev && iolist && (iolist->iol_len == sizeof(cc1xxx_l2hdr_t)));
     lifi_dev->output_buf.preamble = PREAMBLE;
     /* Copy data to send into frame buffer */
-    size_t size = sizeof(cc1xxx_l2hdr_t);
-    memcpy(lifi_dev->output_buf.payload, iolist->iol_base, sizeof(cc1xxx_l2hdr_t));
+    size_t payload_size = 0;
+    memcpy(&lifi_dev->output_buf.layer2_hdr, iolist->iol_base, sizeof(cc1xxx_l2hdr_t));
 
     for (const iolist_t *iol = iolist->iol_next; iol; iol = iol->iol_next) {
         if (iol->iol_len) {
@@ -261,21 +277,21 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
                 // Todo remove after debugging
                 return -1;
             }
-            if (size + iol->iol_len > CC110X_MAX_FRAME_SIZE) {
+            if (payload_size + iol->iol_len > CC110X_MAX_FRAME_SIZE) {
                 DEBUG("[liFi] netdev_driver_t::send(): Frame size of %uB "
                       "exceeds maximum supported size of %uB\n",
-                      (unsigned)(size + iol->iol_len),
+                      (unsigned)(payload_size + iol->iol_len),
                       (unsigned)CC110X_MAX_FRAME_SIZE);
                 return -1;
             }
             DEBUG("[lifi] netdev_driver_t::send(): iolist entry has size of: %u\n",iol->iol_len);
-            memcpy(lifi_dev->output_buf.payload + size, iol->iol_base, iol->iol_len);
-            size += iol->iol_len;
+            memcpy(lifi_dev->output_buf.payload + payload_size, iol->iol_base, iol->iol_len);
+            payload_size += iol->iol_len;
         }
     }
 
-    lifi_dev->output_buf.len = (uint8_t)size;
-    printf("Sending %u bytes\n", size);
+    lifi_dev->output_buf.len = (uint8_t)payload_size;
+    DEBUG("Sending %u bytes\n", payload_size);
     lifi_send_frame(lifi_dev);
     return 0;
 }
