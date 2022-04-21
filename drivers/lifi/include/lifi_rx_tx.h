@@ -41,16 +41,6 @@ void lifi_isr(netdev_t *dev);
 void lifi_send_frame(lifi_t* lifi_dev);
 
 /**
- * @brief   Bring transceiver into RX mode
- *
- * @param   dev     The device descriptor of the transceiver
- *
- * @pre     @p dev has been acquired using @ref cc110x_acquire
- * @post    @p dev is still acquired, the caller has to release it
- */
-void lifi_enter_rx_mode(lifi_t *dev);
-
-/**
  *
  * @param lifi_dev
  * @param storage_byte
@@ -60,6 +50,7 @@ void lifi_enter_rx_mode(lifi_t *dev);
 void read_store_bit(lifi_t* lifi_dev, uint8_t* storage_byte, uint8_t bit_to_read);
 void lifi_preamble_sync(lifi_t* lifi_dev);
 void init_transceiver_state(lifi_t* lifi_dev);
+bool check_receive_timeout(lifi_t* lifi_dev);
 
 #ifdef __cplusplus
 }

@@ -221,3 +221,21 @@ void init_transceiver_state(lifi_t *lifi_dev) {
     lifi_dev->transceiver_state.currentByte = 0;
     lifi_dev->transceiver_state.high_bit_counter = 0;
 }
+
+bool check_receive_timeout(lifi_t *lifi_dev) {
+    bool timeout = false;
+    lifi_transceiver_state_t *transceiver_state = &lifi_dev->transceiver_state;
+
+    if (transceiver_state->current_frame_part == e_preamble &&
+        xtimer_diff(xtimer_now(), transceiver_state->lastReceive).ticks32 > TIMEOUT_TICKS.ticks32) {
+        // check if we have a timeout on lastReceive in preamble frame part -> reset
+        timeout = true;
+    }
+    else if ((transceiver_state->current_frame_part == e_len || transceiver_state->current_frame_part == e_payload ||
+         transceiver_state->current_frame_part == e_crc16)
+        && xtimer_diff(xtimer_now(), transceiver_state->lastHalfEdge).ticks32 > TIMEOUT_TICKS.ticks32) {
+        // check if we have a timeout in e_len/e_payload/e_crc16 mode -> reset
+        timeout = true;
+    }
+    return timeout;
+}

@@ -71,48 +71,42 @@ void isr_callback_input_pin(void *_dev)
 {
     gpio_toggle(RECEIVE_INTERRUPT);
     lifi_t *lifi_dev = (lifi_t *)_dev;
-    lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
 
-    // check if we have a timeout on lastReceive in preamble frame part -> reset
-    if(transceiver_state->current_frame_part == e_preamble && xtimer_diff(xtimer_now(),transceiver_state->lastReceive).ticks32 > TIMEOUT_TICKS.ticks32){
-        transceiver_state->current_frame_part = e_first_receive;
-        transceiver_state->currentByte = 0;
-        transceiver_state->currentBit = 7;
-        transceiver_state->high_bit_counter = 7;
-    }
+    /* only start receiving if already not sending, receiving our own message does not make sense */
+    if (lifi_dev->state == LIFI_STATE_IDLE || lifi_dev->state == LIFI_STATE_RECEIVING) {
+        lifi_dev->state = LIFI_STATE_RECEIVING;
+        lifi_transceiver_state_t *transceiver_state = &lifi_dev->transceiver_state;
 
-    // check if we have a timeout in e_len/e_payload/e_crc16 mode -> reset
-    if((transceiver_state->current_frame_part == e_len || transceiver_state->current_frame_part == e_payload ||transceiver_state->current_frame_part == e_crc16)
-    && xtimer_diff(xtimer_now(),transceiver_state->lastHalfEdge).ticks32 > TIMEOUT_TICKS.ticks32 ){
-        transceiver_state->current_frame_part = e_first_receive;
-        transceiver_state->currentByte = 0;
-        transceiver_state->currentBit = 7;
-        transceiver_state->high_bit_counter = 7;
-    }
-
-    // Sync to sender frequency
-    if (transceiver_state->current_frame_part == e_first_receive
-        || transceiver_state->current_frame_part == e_preamble) {
-        lifi_preamble_sync(lifi_dev);
-    }
-    // receive data
-    else {
-        // first call here means, that preamble is done. Preamble finished with half period
-        // next interrupt can happen either at next full period or next half period, depends on the first bit to transfer
-
-        // calculate ticks diff between now and last half period receive, used to check if edge has to be dropped
-        xtimer_ticks32_t timediff = xtimer_diff(xtimer_now(), transceiver_state->lastHalfEdge);
-
-        if (timediff.ticks32 >= transceiver_state->min_tolerated_half_clock.ticks32 &&
-            timediff.ticks32 <= transceiver_state->max_tolerated_half_clock.ticks32) {
-            // Drop edges on full period
-            gpio_toggle(FULL_EDGES_DROP_PIN);
+        if (check_receive_timeout(lifi_dev)){
+            transceiver_state->current_frame_part = e_first_receive;
+            transceiver_state->currentByte = 0;
+            transceiver_state->currentBit = 7;
+            transceiver_state->high_bit_counter = 7;
         }
-        // edge seems to be on half period
-        else if (timediff.ticks32 >= transceiver_state->min_tolerated_half_clock.ticks32 * 2 &&
-                 timediff.ticks32 <= 2 * transceiver_state->max_tolerated_half_clock.ticks32) {
-            transceiver_state->lastHalfEdge = xtimer_now();
-            // edge is in expected half period timing
+
+        // Sync to sender frequency
+        if (transceiver_state->current_frame_part == e_first_receive
+            || transceiver_state->current_frame_part == e_preamble) {
+            lifi_preamble_sync(lifi_dev);
+        }
+            // receive data
+        else {
+            // first call here means, that preamble is done. Preamble finished with half period
+            // next interrupt can happen either at next full period or next half period, depends on the first bit to transfer
+
+            // calculate ticks diff between now and last half period receive, used to check if edge has to be dropped
+            xtimer_ticks32_t timediff = xtimer_diff(xtimer_now(), transceiver_state->lastHalfEdge);
+
+            if (timediff.ticks32 >= transceiver_state->min_tolerated_half_clock.ticks32 &&
+                timediff.ticks32 <= transceiver_state->max_tolerated_half_clock.ticks32) {
+                // Drop edges on full period
+                gpio_toggle(FULL_EDGES_DROP_PIN);
+            }
+                // edge seems to be on half period
+            else if (timediff.ticks32 >= transceiver_state->min_tolerated_half_clock.ticks32 * 2 &&
+                     timediff.ticks32 <= 2 * transceiver_state->max_tolerated_half_clock.ticks32) {
+                transceiver_state->lastHalfEdge = xtimer_now();
+                // edge is in expected half period timing
 
                 // check current frame part and currentByte to decide where to store the bit
                 if (transceiver_state->current_frame_part == e_len) {
@@ -152,29 +146,29 @@ void isr_callback_input_pin(void *_dev)
 ////                    printf("char: %c \n", lifi_dev->input_buf.payload[byte]);
 //                    printf("byte: %u \n", lifi_dev->input_buf.payload[byte]);
 //                }
-                puts("resetting");
-                uint16_t crc_16 = crc16_ccitt_calc(lifi_dev->input_buf.payload,lifi_dev->input_buf.len);
-                lifi_dev->input_buf.crc_16 = ntohs(lifi_dev->input_buf.crc_16);
-                if (crc_16 != lifi_dev->input_buf.crc_16){
-                    puts("crc16 did not match!");
-                    for (int pos = 0; pos < lifi_dev->input_buf.len; ++pos) {
-                        printf("%u",lifi_dev->input_buf.payload[pos]);
+                    puts("resetting");
+                    uint16_t crc_16 = crc16_ccitt_calc(lifi_dev->input_buf.payload, lifi_dev->input_buf.len);
+                    lifi_dev->input_buf.crc_16 = ntohs(lifi_dev->input_buf.crc_16);
+                    if (crc_16 != lifi_dev->input_buf.crc_16) {
+                        puts("crc16 did not match!");
+                        for (int pos = 0; pos < lifi_dev->input_buf.len; ++pos) {
+                            printf("%u", lifi_dev->input_buf.payload[pos]);
+                        }
+                        printf("\nCRC ingoing: %u , len: %u \n", lifi_dev->input_buf.crc_16, lifi_dev->input_buf.len);
+                        //todo errorhandling
+                    } else {
+                        netdev_trigger_event_isr(&lifi_dev->netdev);
                     }
-                    printf("\nCRC ingoing: %u , len: %u \n", lifi_dev->input_buf.crc_16, lifi_dev->input_buf.len);
-                    //todo errorhandling
+                    transceiver_state->current_frame_part = e_first_receive;
+                    transceiver_state->currentByte = 0;
+                    transceiver_state->currentBit = 7;
+                    lifi_dev->state = LIFI_STATE_IDLE;
                 }
-                else {
-                    netdev_trigger_event_isr(&lifi_dev->netdev);
-                }
-                transceiver_state->current_frame_part = e_first_receive;
-                transceiver_state->currentByte = 0;
-                transceiver_state->currentBit = 7;
+            } else {
+                gpio_toggle(TIMING_ISSUE_PIN);
             }
-        }
-        else {
-            gpio_toggle(TIMING_ISSUE_PIN);
-        }
 
+        }
     }
 }
 
@@ -265,7 +259,34 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
 {
     lifi_t *lifi_dev = (lifi_t *)netdev;
 
+    DEBUG("[LiFi] netdev_driver_t::send(): Called with state %i\n", (int)lifi_dev->state);
+
     assert(netdev && iolist && (iolist->iol_len == sizeof(cc1xxx_l2hdr_t)));
+
+    /* Check for receive timeout, needs to be done here, as timeout is only reset in GPIO interrupt,
+     * which does not trigger if connection is lost. */
+    if(check_receive_timeout(lifi_dev)){
+        lifi_dev->state = LIFI_STATE_IDLE;
+    }
+    switch (lifi_dev->state) {
+        case LIFI_STATE_RECEIVING:
+            DEBUG("[LiFi] netdev_driver_t::send(): Refusing to send while "
+                  "receiving a frame\n");
+            return -EBUSY;
+        case LIFI_STATE_TRANSMITTING:
+            DEBUG("[LiFi] netdev_driver_t::send(): Refusing to send while "
+                  "transmitting a frame\n");
+            return -EBUSY;
+        case LIFI_STATE_IDLE:
+            /* able to send, so let's go ahead */
+            break;
+        default:
+            DEBUG("[LiFi] netdev_driver_t::send(): Driver state %i prevents "
+                  "sending\n", (int)lifi_dev->state);
+            return -1;
+    }
+
+    lifi_dev->state = LIFI_STATE_TRANSMITTING;
     lifi_dev->output_buf.preamble = PREAMBLE;
     /* Copy data to send into frame buffer */
     size_t payload_size = 0;
@@ -275,6 +296,7 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
         if (iol->iol_len) {
             if(iol->iol_len == 8 || iol->iol_len == 4){
                 // Todo remove after debugging
+                lifi_dev->state = LIFI_STATE_IDLE;
                 return -1;
             }
             if (payload_size + iol->iol_len > CC110X_MAX_FRAME_SIZE) {
@@ -293,6 +315,7 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
     lifi_dev->output_buf.len = (uint8_t)payload_size;
     DEBUG("Sending %u bytes\n", payload_size);
     lifi_send_frame(lifi_dev);
+    lifi_dev->state = LIFI_STATE_IDLE;
     return 0;
 }
 
