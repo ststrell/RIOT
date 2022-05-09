@@ -21,7 +21,7 @@
 #include <errno.h>
 #include <string.h>
 #include <lifi_rx_tx.h>
-#include <cc1xxx_common.h>
+#include <log.h>
 #include "checksum/crc16_ccitt.h"
 
 #include "assert.h"
@@ -97,14 +97,14 @@ void isr_callback_input_pin(void *_dev)
             // calculate ticks diff between now and last half period receive, used to check if edge has to be dropped
             xtimer_ticks32_t timediff = xtimer_diff(xtimer_now(), transceiver_state->lastHalfEdge);
 
-            if (timediff.ticks32 >= transceiver_state->min_tolerated_half_clock.ticks32 &&
-                timediff.ticks32 <= transceiver_state->max_tolerated_half_clock.ticks32) {
+            if (timediff >= transceiver_state->min_tolerated_half_clock &&
+                timediff <= transceiver_state->max_tolerated_half_clock) {
                 // Drop edges on full period
                 gpio_toggle(FULL_EDGES_DROP_PIN);
             }
                 // edge seems to be on half period
-            else if (timediff.ticks32 >= transceiver_state->min_tolerated_half_clock.ticks32 * 2 &&
-                     timediff.ticks32 <= 2 * transceiver_state->max_tolerated_half_clock.ticks32) {
+            else if (timediff >= transceiver_state->min_tolerated_half_clock * 2 &&
+                     timediff <= 2 * transceiver_state->max_tolerated_half_clock) {
                 transceiver_state->lastHalfEdge = xtimer_now();
                 // edge is in expected half period timing
 
@@ -122,9 +122,11 @@ void isr_callback_input_pin(void *_dev)
                                    transceiver_state->currentBit);
                 } else {
                     read_store_bit(lifi_dev,
-                                   &(((uint8_t *) &lifi_dev->input_buf.crc_16)[transceiver_state->currentByte -
-                                                                               lifi_dev->input_buf.len - 1]),
-                                   transceiver_state->currentBit);
+                                   &(((uint8_t *) &lifi_dev->input_buf.crc_16)
+                                   [transceiver_state->currentByte
+                                   - lifi_dev->input_buf.len - 1
+                                   - sizeof(lifi_l2hdr_t)])
+                                   , transceiver_state->currentBit);
                 }
                 if (transceiver_state->currentBit <= -1) {
                     if (transceiver_state->current_frame_part == e_len) {
@@ -156,9 +158,9 @@ void isr_callback_input_pin(void *_dev)
                     if (crc_16 != lifi_dev->input_buf.crc_16) {
                         puts("crc16 did not match!");
                         for (int pos = 0; pos < lifi_dev->input_buf.len; ++pos) {
-                            printf("%u", lifi_dev->input_buf.payload[pos]);
+                            printf("%u ", lifi_dev->input_buf.payload[pos]);
                         }
-                        printf("\nCRC ingoing: %u , len: %u \n", lifi_dev->input_buf.crc_16, lifi_dev->input_buf.len);
+                        printf("\nCRC calculated: %u , CRC ingoing: %u , len: %u \n",crc_16, lifi_dev->input_buf.crc_16, lifi_dev->input_buf.len);
                         //todo errorhandling
                     } else {
                         netdev_trigger_event_isr(&lifi_dev->netdev);
@@ -169,6 +171,7 @@ void isr_callback_input_pin(void *_dev)
                     lifi_dev->state = LIFI_STATE_IDLE;
                 }
             } else {
+                gpio_toggle(MULTI_PURPOSE_DEBUG);
                 gpio_toggle(TIMING_ISSUE_PIN);
             }
 
@@ -197,6 +200,7 @@ static int lifi_init(netdev_t *netdev)
     gpio_init(FULL_EDGES_DROP_PIN,GPIO_OUT);
     gpio_init(BIT_INTERPRETATION_PIN,GPIO_OUT);
     gpio_init(RECEIVE_INTERRUPT,GPIO_OUT);
+    gpio_init(MULTI_PURPOSE_DEBUG,GPIO_OUT);
 
     init_transceiver_state(lifi_dev);
     lifi_dev->baud = 50;
@@ -204,7 +208,7 @@ static int lifi_init(netdev_t *netdev)
 
     // Todo: any mutexes for ISR like in CC1101?
     if (0 == pwm_init(device, mode, frequency, resolution)) {
-        DEBUG("[lifi] netdev_driver_t::init(): Failed to setup pwm device\n");
+        LOG_ERROR("[lifi] netdev_driver_t::init(): Failed to setup pwm device\n");
         retval = -EIO;
         error = true;
     }
@@ -215,7 +219,7 @@ static int lifi_init(netdev_t *netdev)
     if (!error) {
         if (gpio_init_int(inputPin, GPIO_IN, detectedFlanks, isr_callback_input_pin,
                           lifi_dev) != 0) {
-            DEBUG("[lifi] netdev_driver_t::init(): Failed to init input pin gpio interrupt\n");
+            LOG_ERROR("[lifi] netdev_driver_t::init(): Failed to init input pin gpio interrupt\n");
             retval = -EIO;
             error = true;
         }
@@ -265,7 +269,7 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
 
     DEBUG("[LiFi] netdev_driver_t::send(): Called with state %i\n", (int)lifi_dev->state);
 
-    assert(netdev && iolist && (iolist->iol_len == sizeof(cc1xxx_l2hdr_t)));
+    assert(netdev && iolist && (iolist->iol_len == sizeof(lifi_l2hdr_t)));
 
     /* Check for receive timeout, needs to be done here, as timeout is only reset in GPIO interrupt,
      * which does not trigger if connection is lost. */
@@ -294,20 +298,20 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
     lifi_dev->output_buf.preamble = PREAMBLE;
     /* Copy data to send into frame buffer */
     size_t payload_size = 0;
-    memcpy(&lifi_dev->output_buf.layer2_hdr, iolist->iol_base, sizeof(cc1xxx_l2hdr_t));
+    memcpy(&lifi_dev->output_buf.layer2_hdr, iolist->iol_base, sizeof(lifi_l2hdr_t));
 
-    for (const iolist_t *iol = iolist->iol_next; iol; iol = iol->iol_next) {
+    for (iolist_t *iol = iolist->iol_next; iol; iol = iol->iol_next) {
         if (iol->iol_len) {
-            if(iol->iol_len == 8 || iol->iol_len == 4){
-                // Todo remove after debugging
-                lifi_dev->state = LIFI_STATE_IDLE;
-                return -1;
-            }
-            if (payload_size + iol->iol_len > CC110X_MAX_FRAME_SIZE) {
+//            if(iol->iol_len == 8 || iol->iol_len == 4){
+//                // Todo remove after debugging
+//                lifi_dev->state = LIFI_STATE_IDLE;
+//                return -1;
+//            }
+            if (payload_size + iol->iol_len > LIFI_MAX_FRAME_SIZE) {
                 DEBUG("[liFi] netdev_driver_t::send(): Frame size of %uB "
                       "exceeds maximum supported size of %uB\n",
                       (unsigned)(payload_size + iol->iol_len),
-                      (unsigned)CC110X_MAX_FRAME_SIZE);
+                      (unsigned)LIFI_MAX_FRAME_SIZE);
                 return -1;
             }
             DEBUG("[lifi] netdev_driver_t::send(): iolist entry has size of: %u\n",iol->iol_len);
@@ -335,17 +339,17 @@ static int lifi_get(netdev_t *netdev, netopt_t opt,
     switch (opt) {
     case NETOPT_DEVICE_TYPE:
         assert(max_len == sizeof(uint16_t));
-        *((uint16_t *)val) = NETDEV_TYPE_CC110X;
+        *((uint16_t *)val) = NETDEV_TYPE_LIFI;
         return sizeof(uint16_t);
         break;
     case NETOPT_MAX_PDU_SIZE:
         assert(max_len == sizeof(uint16_t));
-        *((uint16_t *)val) = CC110X_MAX_FRAME_SIZE - sizeof(cc1xxx_l2hdr_t);
+        *((uint16_t *)val) = LIFI_MAX_FRAME_SIZE - sizeof(lifi_l2hdr_t);
         return sizeof(uint16_t);
     case NETOPT_ADDRESS:
-        assert(max_len >= CC1XXX_ADDR_SIZE);
+        assert(max_len >= LIFI_ADDR_SIZE);
         *((uint8_t *)val) = dev->addr;
-        return CC1XXX_ADDR_SIZE;
+        return LIFI_ADDR_SIZE;
     default:
         break;
     }
@@ -357,7 +361,7 @@ static int lifi_get(netdev_t *netdev, netopt_t opt,
 static int lifi_set(netdev_t *netdev, netopt_t opt,
                     const void *val, size_t len)
 {
-    // todo implement setter according to getters
+    // @todo implement setter according to getters
     (void)len;
 
     (void)opt;
@@ -365,7 +369,7 @@ static int lifi_set(netdev_t *netdev, netopt_t opt,
 
     switch (opt) {
     case NETOPT_ADDRESS:
-        assert(len == CC1XXX_ADDR_SIZE);
+        assert(len == LIFI_ADDR_SIZE);
         lifi_dev->addr = *(uint8_t *)val;
         return 0;
 //    @todo think about implementing an "promiscuous" address filter

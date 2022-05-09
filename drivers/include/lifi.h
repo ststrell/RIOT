@@ -9,15 +9,9 @@
 #include <net/netdev.h>
 #include <periph/pwm.h>
 #include <xtimer.h>
+#include <net/gnrc/netif.h>
 
-//#include "cc1xxx_common.h"
 #include "mutex.h"
-#include "cc1xxx_common.h"
-//#include "net/gnrc/nettype.h"
-//#include "net/netdev.h"
-//#include "periph/adc.h"
-//#include "periph/gpio.h"
-//#include "periph/spi.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,25 +22,25 @@ extern "C" {
  *
  * This does not include the preamble, sync word, CRC field, and length field.
  */
-#define CC110X_MAX_FRAME_SIZE           0xFF
+#define LIFI_MAX_FRAME_SIZE           0xFF
 
 /**
  * @brief   Maximum (layer 2) payload size supported by the driver
  */
-#define CC110X_MAX_PAYLOAD_SIZE         (CC110X_MAX_FRAME_SIZE - CC1XXX_HEADER_SIZE)
+#define LIFI_MAX_PAYLOAD_SIZE         (LIFI_MAX_FRAME_SIZE - LIFI_HEADER_SIZE)
 
 /**
  * @brief   Maximum number of channels supported by the driver
  */
-#define CC110X_MAX_CHANNELS             8
+#define LIFI_MAX_CHANNELS             8
 
 /**
  * @brief   Default protocol for data that is coming in
  */
 #ifdef MODULE_GNRC_SIXLOWPAN
-#define CC110X_DEFAULT_PROTOCOL         (GNRC_NETTYPE_SIXLOWPAN)
+#define LIFI_DEFAULT_PROTOCOL         (GNRC_NETTYPE_SIXLOWPAN)
 #else
-#define CC110X_DEFAULT_PROTOCOL         (GNRC_NETTYPE_UNDEF)
+#define LIFI_DEFAULT_PROTOCOL         (GNRC_NETTYPE_UNDEF)
 #endif
 
 /**
@@ -58,10 +52,31 @@ extern "C" {
 /**
  * @brief The default channel to set up after initializing the device
  */
-#ifndef CONFIG_CC110X_DEFAULT_CHANNEL
-#define CONFIG_CC110X_DEFAULT_CHANNEL      (0U)
+#ifndef CONFIG_LIFI_DEFAULT_CHANNEL
+#define CONFIG_LIFI_DEFAULT_CHANNEL      (0U)
 #endif
 /** @} */
+
+
+/**
+ * @brief Size of a layer 2 address on CC110x/CC1200 transceivers
+ */
+#define LIFI_ADDR_SIZE                (1)
+
+/**
+ * @brief Special layer 2 address reserved for broadcast frames
+ */
+#define LIFI_BCAST_ADDR               (0x00)
+
+/**
+ * @brief Layer 2 header used in CC1xxx frames
+ *
+ * This structure has the same memory layout as the data send in the frames.
+ */
+typedef struct __attribute__((packed)) {
+    uint8_t dest_addr;      /**< Destination layer 2 address */
+    uint8_t src_addr;       /**< Source layer 2 address */
+} lifi_l2hdr_t;
 
 /**
  * @brief   The state of the CC1100/CC1101 transceiver
@@ -100,11 +115,11 @@ typedef struct {
 typedef struct __attribute__((packed)) {
     uint8_t preamble;
     uint8_t len;            /**< Length of the payload in bytes */
-    cc1xxx_l2hdr_t layer2_hdr;           /**< Length of the payload in bytes */
+    lifi_l2hdr_t layer2_hdr;           /**< Length of the payload in bytes */
     /**
      * @brief   The payload data of the frame
      */
-    uint8_t payload[CC110X_MAX_FRAME_SIZE];
+    uint8_t payload[LIFI_MAX_FRAME_SIZE];
     uint16_t crc_16;
     /**
      * @brief   Index of the next @ref cc110x_framebuf_t::data element to
@@ -182,6 +197,41 @@ typedef struct {
 int lifi_setup(lifi_t *dev, const lifi_params_t *params, uint8_t index);
 
 int lifi_set_baud(lifi_t* dev, uint16_t baud);
+
+
+/**
+ * @brief Statistics for one received frame
+ */
+typedef struct netdev_radio_rx_info cc1xxx_rx_info_t;
+
+/**
+ * @brief   Creates a CC110x/CC1200 network interface
+ *
+ * @param[out] netif    The interface. May not be `NULL`.
+ * @param[in] stack     The stack for the network interface's thread.
+ * @param[in] stacksize Size of @p stack.
+ * @param[in] priority  Priority for the network interface's thread.
+ * @param[in] name      Name for the network interface. May be NULL.
+ * @param[in] dev       Device for the interface.
+ *
+ * @see @ref gnrc_netif_create()
+ *
+ * @return  0 on success
+ * @return  negative number on error
+ */
+int gnrc_netif_lifi_create(gnrc_netif_t *netif, char *stack, int stacksize,
+                             char priority, char *name, netdev_t *dev);
+
+/**
+ * @brief   Retrieve a unique layer-2 address for a cc1xxx instance
+ *
+ * @note    This function has __attribute__((weak)) so you can override this, e.g.
+ *          to construct an address. By default @ref luid_get is used.
+ *
+ * @param[in]   dev     The device descriptor of the transceiver
+ * @param[out]  eui     Destination to write the address to
+ */
+void lifi_eui_get(const netdev_t *dev, uint8_t *eui);
 
 #ifdef __cplusplus
 }

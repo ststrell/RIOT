@@ -28,6 +28,7 @@
 
 int lifi_setup(lifi_t *dev, const lifi_params_t *params, uint8_t index)
 {
+    DEBUG("[lifi] Setting up Lifi\n");
     if (!dev || !params) {
         return -EINVAL;
     }
@@ -40,7 +41,7 @@ int lifi_setup(lifi_t *dev, const lifi_params_t *params, uint8_t index)
     dev->params = *params;
     dev->netdev.driver = &lifi_driver;
     dev->state = LIFI_STATE_IDLE;
-    netdev_register(&dev->netdev, NETDEV_CC110X, index);
+    netdev_register(&dev->netdev, NETDEV_LIFI, index);
     return 0;
 }
 

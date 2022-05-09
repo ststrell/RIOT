@@ -47,7 +47,19 @@ static const timer_conf_t timer_config[] = {
 #endif
         .bus      = APB1,
         .irqn     = TIM2_IRQn
-    }
+    },
+        {
+            .dev      = TIM5,
+            .max      = 0xffffffff,
+#if defined(CPU_FAM_STM32G4) || defined(CPU_FAM_STM32L5) || \
+    defined(CPU_FAM_STM32U5)
+                    .rcc_mask = RCC_APB1ENR1_TIM5EN,
+#else
+            .rcc_mask = RCC_APB1ENR_TIM5EN,
+#endif
+            .bus      = APB1,
+            .irqn     = TIM5_IRQn
+        }
 };
 
 #define TIMER_0_ISR         isr_tim2

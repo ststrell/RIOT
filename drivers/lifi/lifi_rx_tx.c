@@ -30,7 +30,7 @@
 #define HIGH_GAIN (RESOLUTION / 2)
 #define BAUD_TO_US_PERIOD(baud) (1000000/(baud*8))
 #define LOW_GAIN 0
-#define SLEEP_TIME_US 1000
+#define TIMEOUT_TICKS xtimer_ticks_from_usec(10000)
 
 /* Use NETDEV_EVENT_ISR to indicate that no event needs to be passed to upper
  * layer at end of ISR, as ISR will never need this event
@@ -128,6 +128,7 @@ void lifi_send_frame(lifi_t* lifi_dev){
     const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
     const pwm_t device = lifi_dev->params.output_pwm_device;
     lifi_framebuf_t * framebuf = &lifi_dev->output_buf;
+    lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
 
     gpio_init(DATA_SENDER_PIN, GPIO_OUT);
     gpio_init(CLOCK_PIN, GPIO_OUT);
@@ -137,17 +138,71 @@ void lifi_send_frame(lifi_t* lifi_dev){
 
     init_transceiver_state(lifi_dev);
 
-    lifi_dev->transceiver_state.current_frame_part = e_preamble;
+    transceiver_state->current_frame_part = e_preamble;
     lifi_send_bits(lifi_dev, sizeof(framebuf->preamble),&framebuf->preamble);
-    lifi_dev->transceiver_state.current_frame_part = e_len;
+    transceiver_state->current_frame_part = e_len;
     lifi_send_bits(lifi_dev, sizeof(framebuf->len),&framebuf->len);
-    lifi_dev->transceiver_state.current_frame_part = e_layer2_header;
+    transceiver_state->current_frame_part = e_layer2_header;
     lifi_send_bits(lifi_dev, sizeof(framebuf->layer2_hdr), (uint8_t *) &framebuf->layer2_hdr);
-    lifi_dev->transceiver_state.current_frame_part = e_payload;
+    transceiver_state->current_frame_part = e_payload;
     lifi_send_bits(lifi_dev, framebuf->len,framebuf->payload);
-    lifi_dev->transceiver_state.current_frame_part = e_crc16;
+    transceiver_state->current_frame_part = e_crc16;
     framebuf->crc_16 = htons(framebuf->crc_16);
     lifi_send_bits(lifi_dev, sizeof(framebuf->crc_16), (uint8_t *) &framebuf->crc_16);
+    // todo remove this after RIOT interrupt fix
+    // send last bit again
+
+    uint8_t* bytes = (uint8_t*)&framebuf->crc_16;
+    uint8_t byte = 7;
+    uint8_t bit = 0;
+    gpio_toggle(CLOCK_PIN);
+    gpio_toggle(MULTI_PURPOSE_DEBUG);
+    // IEEE 802.3 rising edge for logic 1
+    if ((bytes[byte] >> bit) & 0b1) {
+        gpio_set(DATA_SENDER_PIN);
+        if(transceiver_state->current_frame_part != e_preamble && transceiver_state->high_bit_counter >= 7){
+            // send a stuffing zero bit, to avoid preamble duplication
+            send_low_bit(lifi_dev);
+            transceiver_state->high_bit_counter = 0;
+        }
+        transceiver_state->high_bit_counter++;
+        send_high_bit(lifi_dev);
+    }
+    else {
+        // IEEE 802.3 falling edge for logic 0
+        gpio_clear(DATA_SENDER_PIN);
+        if(transceiver_state->current_frame_part != e_preamble && transceiver_state->high_bit_counter >= 7){
+            // sent 7 high bits, need so send a stuffing zero bit, even though the next bit would be zero anyway.
+            // Receiver does not know that when receiving
+            send_low_bit(lifi_dev);
+        }
+        send_low_bit(lifi_dev);
+        transceiver_state->high_bit_counter = 0;
+    }
+    gpio_toggle(MULTI_PURPOSE_DEBUG);
+    gpio_toggle(CLOCK_PIN);
+    // IEEE 802.3 rising edge for logic 1
+    if ((bytes[byte] >> bit) & 0b1) {
+        gpio_set(DATA_SENDER_PIN);
+        if(transceiver_state->current_frame_part != e_preamble && transceiver_state->high_bit_counter >= 7){
+            // send a stuffing zero bit, to avoid preamble duplication
+            send_low_bit(lifi_dev);
+            transceiver_state->high_bit_counter = 0;
+        }
+        transceiver_state->high_bit_counter++;
+        send_high_bit(lifi_dev);
+    }
+    else {
+        // IEEE 802.3 falling edge for logic 0
+        gpio_clear(DATA_SENDER_PIN);
+        if(transceiver_state->current_frame_part != e_preamble && transceiver_state->high_bit_counter >= 7){
+            // sent 7 high bits, need so send a stuffing zero bit, even though the next bit would be zero anyway.
+            // Receiver does not know that when receiving
+            send_low_bit(lifi_dev);
+        }
+        send_low_bit(lifi_dev);
+        transceiver_state->high_bit_counter = 0;
+    }
 
     framebuf->pos = 0;
     pwm_set(device, channel, 0);     // turn off pwm
@@ -188,21 +243,22 @@ void lifi_preamble_sync(lifi_t* lifi_dev){
     if (transceiver_state->current_frame_part == e_first_receive) {
         transceiver_state->lastReceive = xtimer_now();
         transceiver_state->meanHalfClockTicks = 0;
-        transceiver_state->min_tolerated_half_clock.ticks32 = 0;
-        transceiver_state->max_tolerated_half_clock.ticks32 = 0;
+        transceiver_state->min_tolerated_half_clock = 0;
+        transceiver_state->max_tolerated_half_clock = 0;
         preambleFlankCounter = 0;
         transceiver_state->current_frame_part = e_preamble;
     }
     else {
         xtimer_ticks32_t timediff = xtimer_diff(xtimer_now(), transceiver_state->lastReceive);
-        transceiver_state->meanHalfClockTicks += (float)timediff.ticks32 / (float)expectedPreambleFlanks;
+        transceiver_state->meanHalfClockTicks += (float)timediff / (float)expectedPreambleFlanks;
         transceiver_state->lastReceive = xtimer_now();
 
         if (preambleFlankCounter >= expectedPreambleFlanks -1) {
             transceiver_state->lastHalfEdge = xtimer_now();
             transceiver_state->current_frame_part = e_len;
-            transceiver_state->min_tolerated_half_clock.ticks32 = (uint32_t)(0.6 * transceiver_state->meanHalfClockTicks);
-            transceiver_state->max_tolerated_half_clock.ticks32 = (uint32_t)(1.4 * transceiver_state->meanHalfClockTicks);
+            // todo move allowed range to settable variables
+            transceiver_state->min_tolerated_half_clock = (uint32_t)(0.6 * transceiver_state->meanHalfClockTicks);
+            transceiver_state->max_tolerated_half_clock = (uint32_t)(1.4 * transceiver_state->meanHalfClockTicks);
             transceiver_state->previousStateHigh = gpio_read(lifi_dev->params.input_pin) != 0;
             transceiver_state->high_bit_counter = 7;
         }
@@ -210,13 +266,13 @@ void lifi_preamble_sync(lifi_t* lifi_dev){
 }
 
 void init_transceiver_state(lifi_t *lifi_dev) {
-    lifi_dev->transceiver_state.min_tolerated_half_clock.ticks32 = 0;
-    lifi_dev->transceiver_state.max_tolerated_half_clock.ticks32 = 0;
+    lifi_dev->transceiver_state.min_tolerated_half_clock = 0;
+    lifi_dev->transceiver_state.max_tolerated_half_clock = 0;
     lifi_dev->transceiver_state.current_frame_part = e_first_receive;
     lifi_dev->transceiver_state.previousStateHigh = false;
     lifi_dev->transceiver_state.meanHalfClockTicks = 0;
-    lifi_dev->transceiver_state.lastReceive.ticks32 = 0 ;
-    lifi_dev->transceiver_state.lastHalfEdge.ticks32 = 0;
+    lifi_dev->transceiver_state.lastReceive = 0 ;
+    lifi_dev->transceiver_state.lastHalfEdge = 0;
     lifi_dev->transceiver_state.currentBit = 7;
     lifi_dev->transceiver_state.currentByte = 0;
     lifi_dev->transceiver_state.high_bit_counter = 0;
@@ -227,13 +283,13 @@ bool check_receive_timeout(lifi_t *lifi_dev) {
     lifi_transceiver_state_t *transceiver_state = &lifi_dev->transceiver_state;
 
     if (transceiver_state->current_frame_part == e_preamble &&
-        xtimer_diff(xtimer_now(), transceiver_state->lastReceive).ticks32 > TIMEOUT_TICKS.ticks32) {
+        xtimer_diff(xtimer_now(), transceiver_state->lastReceive) > TIMEOUT_TICKS) {
         // check if we have a timeout on lastReceive in preamble frame part -> reset
         timeout = true;
     }
     else if ((transceiver_state->current_frame_part == e_len || transceiver_state->current_frame_part == e_payload ||
          transceiver_state->current_frame_part == e_crc16)
-        && xtimer_diff(xtimer_now(), transceiver_state->lastHalfEdge).ticks32 > TIMEOUT_TICKS.ticks32) {
+        && xtimer_diff(xtimer_now(), transceiver_state->lastHalfEdge) > TIMEOUT_TICKS) {
         // check if we have a timeout in e_len/e_payload/e_crc16 mode -> reset
         timeout = true;
     }
