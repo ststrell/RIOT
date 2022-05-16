@@ -22,13 +22,28 @@
 #include "net/netdev.h"
 #include "lifi.h"
 
-#define FULL_EDGES_DROP_PIN GPIO_PIN(PORT_F, 15)
-#define BIT_INTERPRETATION_PIN GPIO_PIN(PORT_G, 14)
-#define MULTI_PURPOSE_DEBUG GPIO_PIN(PORT_G, 9)
-#define TIMING_ISSUE_PIN GPIO_PIN(PORT_B, 8)
-#define RECEIVE_INTERRUPT GPIO_PIN(PORT_B, 9)
-#define CLOCK_PIN GPIO_PIN(PORT_E, 13)
-#define DATA_SENDER_PIN GPIO_PIN(PORT_E, 11)
+
+#ifndef FULL_EDGES_DROP_PIN
+#define FULL_EDGES_DROP_PIN GPIO_PIN(1, 2)
+#endif
+#ifndef BIT_INTERPRETATION_PIN
+#define BIT_INTERPRETATION_PIN GPIO_PIN(1,3)
+#endif
+#ifndef MULTI_PURPOSE_DEBUG
+#define MULTI_PURPOSE_DEBUG GPIO_PIN(1, 4)
+#endif
+#ifndef TIMING_ISSUE_PIN
+#define TIMING_ISSUE_PIN GPIO_PIN(1, 5)
+#endif
+#ifndef RECEIVE_INTERRUPT
+#define RECEIVE_INTERRUPT GPIO_PIN(1, 6)
+#endif
+#ifndef CLOCK_PIN
+#define CLOCK_PIN GPIO_PIN(1, 7)
+#endif
+#ifndef DATA_SENDER_PIN
+#define DATA_SENDER_PIN GPIO_PIN(1, 8)
+#endif
 
 #ifdef __cplusplus
 extern "C" {

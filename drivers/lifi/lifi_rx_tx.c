@@ -22,12 +22,12 @@
 #include "lifi.h"
 #include "lifi_rx_tx.h"
 #include "checksum/crc16_ccitt.h"
+#include "lifi_params.h"
 
 #define ENABLE_DEBUG 0
 #include "debug.h"
 
-#define RESOLUTION 255
-#define HIGH_GAIN (RESOLUTION / 2)
+#define HIGH_GAIN (LIFI_PWM_RESOLUTION/2)
 #define BAUD_TO_US_PERIOD(baud) (1000000/(baud*8))
 #define LOW_GAIN 0
 #define TIMEOUT_TICKS xtimer_ticks_from_usec(10000)
@@ -151,58 +151,6 @@ void lifi_send_frame(lifi_t* lifi_dev){
     lifi_send_bits(lifi_dev, sizeof(framebuf->crc_16), (uint8_t *) &framebuf->crc_16);
     // todo remove this after RIOT interrupt fix
     // send last bit again
-
-    uint8_t* bytes = (uint8_t*)&framebuf->crc_16;
-    uint8_t byte = 7;
-    uint8_t bit = 0;
-    gpio_toggle(CLOCK_PIN);
-    gpio_toggle(MULTI_PURPOSE_DEBUG);
-    // IEEE 802.3 rising edge for logic 1
-    if ((bytes[byte] >> bit) & 0b1) {
-        gpio_set(DATA_SENDER_PIN);
-        if(transceiver_state->current_frame_part != e_preamble && transceiver_state->high_bit_counter >= 7){
-            // send a stuffing zero bit, to avoid preamble duplication
-            send_low_bit(lifi_dev);
-            transceiver_state->high_bit_counter = 0;
-        }
-        transceiver_state->high_bit_counter++;
-        send_high_bit(lifi_dev);
-    }
-    else {
-        // IEEE 802.3 falling edge for logic 0
-        gpio_clear(DATA_SENDER_PIN);
-        if(transceiver_state->current_frame_part != e_preamble && transceiver_state->high_bit_counter >= 7){
-            // sent 7 high bits, need so send a stuffing zero bit, even though the next bit would be zero anyway.
-            // Receiver does not know that when receiving
-            send_low_bit(lifi_dev);
-        }
-        send_low_bit(lifi_dev);
-        transceiver_state->high_bit_counter = 0;
-    }
-    gpio_toggle(MULTI_PURPOSE_DEBUG);
-    gpio_toggle(CLOCK_PIN);
-    // IEEE 802.3 rising edge for logic 1
-    if ((bytes[byte] >> bit) & 0b1) {
-        gpio_set(DATA_SENDER_PIN);
-        if(transceiver_state->current_frame_part != e_preamble && transceiver_state->high_bit_counter >= 7){
-            // send a stuffing zero bit, to avoid preamble duplication
-            send_low_bit(lifi_dev);
-            transceiver_state->high_bit_counter = 0;
-        }
-        transceiver_state->high_bit_counter++;
-        send_high_bit(lifi_dev);
-    }
-    else {
-        // IEEE 802.3 falling edge for logic 0
-        gpio_clear(DATA_SENDER_PIN);
-        if(transceiver_state->current_frame_part != e_preamble && transceiver_state->high_bit_counter >= 7){
-            // sent 7 high bits, need so send a stuffing zero bit, even though the next bit would be zero anyway.
-            // Receiver does not know that when receiving
-            send_low_bit(lifi_dev);
-        }
-        send_low_bit(lifi_dev);
-        transceiver_state->high_bit_counter = 0;
-    }
 
     framebuf->pos = 0;
     pwm_set(device, channel, 0);     // turn off pwm

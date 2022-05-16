@@ -33,8 +33,12 @@ extern "C" {
  * @{
  */
 
+// todo think about moving this to parameters for different chips frequencies
+#define LIFI_PWM_RESOLUTION 210
+#define LIFI_PWM_FREQUENCY 38000
+
 #ifndef LIFI_PARAM_OUTPUT_PWM_DEVICE
-#define LIFI_PARAM_OUTPUT_PWM_DEVICE             0 /**< SPI-CS connected to LIFI */
+#define LIFI_PARAM_OUTPUT_PWM_DEVICE             1 /**< SPI-CS connected to LIFI */
 #endif
 
 #ifndef LIFI_PARAM_OUTPUT_PWM_DEVICE_CHAN
@@ -42,7 +46,7 @@ extern "C" {
 #endif
 
 #ifndef LIFI_PARAM_INPUT_PIN
-#define LIFI_PARAM_INPUT_PIN             GPIO_PIN(PORT_F, 14) /**< SPI-CS connected to LIFI */
+#define LIFI_PARAM_INPUT_PIN             GPIO_PIN(1,1) /**< SPI-CS connected to LIFI */
 #endif
 
 #ifndef LIFI_PARAMS

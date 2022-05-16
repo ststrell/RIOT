@@ -22,6 +22,7 @@
 #include <string.h>
 #include <lifi_rx_tx.h>
 #include <log.h>
+#include <lifi_params.h>
 #include "checksum/crc16_ccitt.h"
 
 #include "assert.h"
@@ -140,38 +141,36 @@ void isr_callback_input_pin(void *_dev)
                     }
                     transceiver_state->currentBit = 7;
                     transceiver_state->currentByte++;
-                }
-                if (transceiver_state->currentByte ==
-                -1
-                + lifi_dev->input_buf.len
-                + sizeof(lifi_dev->input_buf.len)
-                + sizeof(lifi_dev->input_buf.crc_16)
-                + sizeof(lifi_dev->input_buf.layer2_hdr)
-                && transceiver_state->currentBit == 0) {
-//                for (int byte = 0; byte < lifi_dev->input_buf.len; ++byte) {
-////                    printf("char: %c \n", lifi_dev->input_buf.payload[byte]);
-//                    printf("byte: %u \n", lifi_dev->input_buf.payload[byte]);
-//                }
-                    puts("resetting");
-                    uint16_t crc_16 = crc16_ccitt_calc(lifi_dev->input_buf.payload, lifi_dev->input_buf.len);
-                    lifi_dev->input_buf.crc_16 = ntohs(lifi_dev->input_buf.crc_16);
-                    if (crc_16 != lifi_dev->input_buf.crc_16) {
-                        puts("crc16 did not match!");
-                        for (int pos = 0; pos < lifi_dev->input_buf.len; ++pos) {
-                            printf("%u ", lifi_dev->input_buf.payload[pos]);
+                    if (transceiver_state->currentByte ==
+                    sizeof(lifi_dev->input_buf.len)
+                    + sizeof(lifi_dev->input_buf.layer2_hdr)
+                    + lifi_dev->input_buf.len
+                    + sizeof(lifi_dev->input_buf.crc_16)) {
+                        gpio_toggle(MULTI_PURPOSE_DEBUG);
+    //                for (int byte = 0; byte < lifi_dev->input_buf.len; ++byte) {
+    ////                    printf("char: %c \n", lifi_dev->input_buf.payload[byte]);
+    //                    printf("byte: %u \n", lifi_dev->input_buf.payload[byte]);
+    //                }
+    //                    puts("resetting");
+                        uint16_t crc_16 = crc16_ccitt_calc(lifi_dev->input_buf.payload, lifi_dev->input_buf.len);
+                        lifi_dev->input_buf.crc_16 = ntohs(lifi_dev->input_buf.crc_16);
+                        if (crc_16 != lifi_dev->input_buf.crc_16) {
+    //                        puts("crc16 did not match!");
+    //                        for (int pos = 0; pos < lifi_dev->input_buf.len; ++pos) {
+    //                            printf("%u ", lifi_dev->input_buf.payload[pos]);
+    //                        }
+    //                        printf("\nCRC calculated: %u , CRC ingoing: %u , len: %u \n",crc_16, lifi_dev->input_buf.crc_16, lifi_dev->input_buf.len);
+                            //todo errorhandling
+                        } else {
+                            netdev_trigger_event_isr(&lifi_dev->netdev);
                         }
-                        printf("\nCRC calculated: %u , CRC ingoing: %u , len: %u \n",crc_16, lifi_dev->input_buf.crc_16, lifi_dev->input_buf.len);
-                        //todo errorhandling
-                    } else {
-                        netdev_trigger_event_isr(&lifi_dev->netdev);
+                        transceiver_state->current_frame_part = e_first_receive;
+                        transceiver_state->currentByte = 0;
+                        transceiver_state->currentBit = 7;
+                        lifi_dev->state = LIFI_STATE_IDLE;
                     }
-                    transceiver_state->current_frame_part = e_first_receive;
-                    transceiver_state->currentByte = 0;
-                    transceiver_state->currentBit = 7;
-                    lifi_dev->state = LIFI_STATE_IDLE;
                 }
             } else {
-                gpio_toggle(MULTI_PURPOSE_DEBUG);
                 gpio_toggle(TIMING_ISSUE_PIN);
             }
 
@@ -184,8 +183,8 @@ static int lifi_init(netdev_t *netdev)
 {
     DEBUG("[LiFi] netdev_driver_t::init() called lifi_init fun\n");
     lifi_t *lifi_dev = (lifi_t *)netdev;
-    const uint32_t frequency = 38000;
-    const uint16_t resolution = 255;
+    const uint32_t frequency = LIFI_PWM_FREQUENCY;
+    const uint16_t resolution = LIFI_PWM_RESOLUTION;
     const pwm_t device = lifi_dev->params.output_pwm_device;
     const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
     const pwm_mode_t mode = PWM_LEFT;
