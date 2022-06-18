@@ -102,6 +102,10 @@ typedef struct {
     pwm_t output_pwm_device;                        /**< GPIO pin connected to GDO2 */
     uint8_t output_pwm_device_channel;                        /**< GPIO pin connected to GDO2 */
     gpio_t input_pin;                        /**< GPIO pin connected to GDO2 */
+    uint16_t pwm_frequency;
+    uint16_t pwm_resolution;
+    uint16_t pwm_high_gain;
+    uint16_t pwm_low_gain;
 } lifi_params_t;
 
 /**

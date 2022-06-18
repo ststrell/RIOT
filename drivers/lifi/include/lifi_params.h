@@ -34,8 +34,8 @@ extern "C" {
  */
 
 // todo think about moving this to parameters for different chips frequencies
-#define LIFI_PWM_RESOLUTION 210
-#define LIFI_PWM_FREQUENCY 38000
+#define DEFAULT_LIFI_PWM_RESOLUTION 210
+#define DEFAULT_LIFI_PWM_FREQUENCY 38000
 
 #ifndef LIFI_PARAM_OUTPUT_PWM_DEVICE
 #define LIFI_PARAM_OUTPUT_PWM_DEVICE             1 /**< SPI-CS connected to LIFI */

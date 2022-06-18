@@ -27,9 +27,7 @@
 #define ENABLE_DEBUG 0
 #include "debug.h"
 
-#define HIGH_GAIN (LIFI_PWM_RESOLUTION/2)
 #define BAUD_TO_US_PERIOD(baud) (1000000/(baud*8))
-#define LOW_GAIN 0
 #define TIMEOUT_TICKS xtimer_ticks_from_usec(10000)
 
 /* Use NETDEV_EVENT_ISR to indicate that no event needs to be passed to upper
@@ -57,8 +55,10 @@ static void send_double_edge(lifi_t* lifi_dev, uint8_t gain){
     uint8_t channel = lifi_dev->params.output_pwm_device_channel;
     pwm_t device = lifi_dev->params.output_pwm_device;
     uint16_t baud = lifi_dev->baud;
+    uint16_t high_gain = lifi_dev->params.pwm_high_gain;
+    uint16_t low_gain = lifi_dev->params.pwm_low_gain;
 
-    pwm_set(device, channel, gain == HIGH_GAIN ? LOW_GAIN : HIGH_GAIN);
+    pwm_set(device, channel, gain == high_gain ? low_gain : high_gain);
     xtimer_usleep(BAUD_TO_US_PERIOD(baud)/2);
     pwm_set(device, channel, gain);
     xtimer_usleep(BAUD_TO_US_PERIOD(baud)/2);
@@ -66,26 +66,28 @@ static void send_double_edge(lifi_t* lifi_dev, uint8_t gain){
 
 static void send_high_bit(lifi_t* lifi_dev){
     lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
+    uint16_t high_gain = lifi_dev->params.pwm_high_gain;
 
     gpio_set(DATA_SENDER_PIN);
     if (transceiver_state->previousStateHigh) {
-        send_double_edge(lifi_dev, HIGH_GAIN);
+        send_double_edge(lifi_dev, high_gain);
     }
     else {
-        send_single_edge(lifi_dev, HIGH_GAIN);
+        send_single_edge(lifi_dev, high_gain);
     }
     transceiver_state->previousStateHigh = true;
 }
 
 static void send_low_bit(lifi_t* lifi_dev){
     lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
+    uint16_t low_gain = lifi_dev->params.pwm_low_gain;
 
     gpio_clear(DATA_SENDER_PIN);
     if (transceiver_state->previousStateHigh) {
-        send_single_edge(lifi_dev, LOW_GAIN);
+        send_single_edge(lifi_dev, low_gain);
     }
     else {
-        send_double_edge(lifi_dev, LOW_GAIN);
+        send_double_edge(lifi_dev, low_gain);
     }
     transceiver_state->previousStateHigh = false;
 }

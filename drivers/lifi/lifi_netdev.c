@@ -186,8 +186,10 @@ static int lifi_init(netdev_t *netdev)
 {
     DEBUG("[LiFi] netdev_driver_t::init() called lifi_init fun\n");
     lifi_t *lifi_dev = (lifi_t *)netdev;
-    const uint32_t frequency = LIFI_PWM_FREQUENCY;
-    const uint16_t resolution = LIFI_PWM_RESOLUTION;
+    lifi_dev->params.pwm_frequency = DEFAULT_LIFI_PWM_FREQUENCY;
+    lifi_dev->params.pwm_resolution = DEFAULT_LIFI_PWM_RESOLUTION;
+    lifi_dev->params.pwm_high_gain = DEFAULT_LIFI_PWM_RESOLUTION/2;
+    lifi_dev->params.pwm_low_gain = 0;
     const pwm_t device = lifi_dev->params.output_pwm_device;
     const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
     const pwm_mode_t mode = PWM_LEFT;
@@ -215,7 +217,7 @@ static int lifi_init(netdev_t *netdev)
     assert(lifi_dev->addr != LIFI_BCAST_ADDR);
 
     // Todo: any mutexes for ISR like in CC1101?
-    if (0 == pwm_init(device, mode, frequency, resolution)) {
+    if (0 == pwm_init(device, mode, lifi_dev->params.pwm_frequency,lifi_dev->params.pwm_resolution)) {
         LOG_ERROR("[lifi] netdev_driver_t::init(): Failed to setup pwm device\n");
         retval = -EIO;
         error = true;
