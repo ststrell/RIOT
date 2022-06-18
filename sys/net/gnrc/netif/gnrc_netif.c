@@ -114,6 +114,7 @@ bool gnrc_netif_dev_is_6lo(const gnrc_netif_t *netif)
 #endif
         case NETDEV_TYPE_IEEE802154:
         case NETDEV_TYPE_CC110X:
+        case NETDEV_TYPE_LIFI:
         case NETDEV_TYPE_BLE:
         case NETDEV_TYPE_NRFMIN:
         case NETDEV_TYPE_NRF24L01P_NG:
@@ -1567,6 +1568,7 @@ static void _test_options(gnrc_netif_t *netif)
 #endif  /* MODULE_GNRC_SIXLOWPAN_ND */
             break;
         }
+        case NETDEV_TYPE_LIFI:
         case NETDEV_TYPE_CC110X:
             assert(netif->flags & GNRC_NETIF_FLAGS_HAS_L2ADDR);
             assert(1U == netif->l2addr_len);

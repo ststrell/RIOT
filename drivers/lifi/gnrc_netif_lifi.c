@@ -88,8 +88,8 @@ static gnrc_pktsnip_t *lifi_adpt_recv(gnrc_netif_t *netif)
     }
     netif_hdr = (gnrc_netif_hdr_t *)hdr->data;
     gnrc_netif_hdr_set_netif(netif_hdr, netif);
-    netif_hdr->rssi = rx_info.rssi;
-    netif_hdr->lqi = rx_info.lqi;
+    netif_hdr->rssi = GNRC_NETIF_HDR_NO_RSSI;
+    netif_hdr->lqi = GNRC_NETIF_HDR_NO_LQI;
     if (l2hdr.dest_addr == LIFI_BCAST_ADDR) {
         netif_hdr->flags = GNRC_NETIF_HDR_FLAGS_BROADCAST;
     }
@@ -120,7 +120,7 @@ static int lifi_adpt_send(gnrc_netif_t *netif, gnrc_pktsnip_t *pkt)
 
     /* get the payload size and the dst address details */
     size = gnrc_pkt_len(pkt->next);
-    DEBUG("[lifi-gnrc] send: payload of packet is %i\n", (int)size);
+    DEBUG("[lifi-gnrc] send: payload size of packet is %i\n", (int)size);
     netif_hdr = (gnrc_netif_hdr_t *)pkt->data;
 
     l2hdr.src_addr = lifi_dev->addr;

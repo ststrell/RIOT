@@ -40,7 +40,7 @@ static inline int _dehex(char c, int default_)
     }
 }
 
-#if defined(MODULE_CC110X) || defined(MODULE_NRFMIN)
+#if defined(MODULE_CC110X) || defined(MODULE_NRFMIN) || defined (MODULE_LIFI)
 static void _create_eui64_from_short(const uint8_t *addr, size_t addr_len,
                                      eui64_t *eui64)
 {
@@ -102,8 +102,9 @@ int l2util_eui64_from_addr(int dev_type, const uint8_t *addr, size_t addr_len,
                     return -EINVAL;
             }
 #endif  /* defined(MODULE_NETDEV_IEEE802154) || defined(MODULE_XBEE) */
-#if defined(MODULE_CC110X) || defined(MODULE_NRFMIN)
+#if defined(MODULE_CC110X) || defined(MODULE_NRFMIN)|| defined(MODULE_LIFI)
         case NETDEV_TYPE_CC110X:
+        case NETDEV_TYPE_LIFI:
         case NETDEV_TYPE_NRFMIN:
             if (addr_len <= 3) {
                 _create_eui64_from_short(addr, addr_len, eui64);
@@ -156,9 +157,10 @@ int l2util_ipv6_iid_from_addr(int dev_type,
                 return -EINVAL;
             }
 #endif  /* defined(MODULE_NETDEV_IEEE802154) || defined(MODULE_XBEE) */
-#if defined(MODULE_CC110X) || defined(MODULE_NRFMIN)
+#if defined(MODULE_CC110X) || defined(MODULE_NRFMIN)|| defined(MODULE_LIFI)
         case NETDEV_TYPE_CC110X:
         case NETDEV_TYPE_NRFMIN:
+        case NETDEV_TYPE_LIFI:
             if (addr_len <= 3) {
                 _create_eui64_from_short(addr, addr_len, iid);
                 /* since this address conversion is based on the IEEE
@@ -220,8 +222,9 @@ int l2util_ipv6_iid_to_addr(int dev_type, const eui64_t *iid, uint8_t *addr)
             addr[1] = iid->uint8[7];
             return sizeof(uint16_t);
 #endif  /* MODULE_NETDEV_IEEE802154 */
-#ifdef MODULE_CC110X
+#if defined(MODULE_CC110X) || defined(MODULE_LIFI)
         case NETDEV_TYPE_CC110X:
+        case NETDEV_TYPE_LIFI:
             addr[0] = iid->uint8[7];
             return sizeof(uint8_t);
 #endif  /* MODULE_CC110X */
@@ -257,8 +260,9 @@ int l2util_ndp_addr_len_from_l2ao(int dev_type,
                                   const ndp_opt_t *opt)
 {
     switch (dev_type) {
-#ifdef MODULE_CC110X
+#if defined(MODULE_CC110X) || defined(MODULE_LIFI)
         case NETDEV_TYPE_CC110X:
+        case NETDEV_TYPE_LIFI:
             (void)opt;
             return sizeof(uint8_t);
 #endif  /* MODULE_CC110X */

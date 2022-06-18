@@ -60,7 +60,7 @@ static void send_double_edge(lifi_t* lifi_dev, uint8_t gain){
 
     pwm_set(device, channel, gain == HIGH_GAIN ? LOW_GAIN : HIGH_GAIN);
     xtimer_usleep(BAUD_TO_US_PERIOD(baud)/2);
-    pwm_set(device, channel, gain == HIGH_GAIN ? HIGH_GAIN :LOW_GAIN);
+    pwm_set(device, channel, gain);
     xtimer_usleep(BAUD_TO_US_PERIOD(baud)/2);
 }
 
@@ -149,8 +149,6 @@ void lifi_send_frame(lifi_t* lifi_dev){
     transceiver_state->current_frame_part = e_crc16;
     framebuf->crc_16 = htons(framebuf->crc_16);
     lifi_send_bits(lifi_dev, sizeof(framebuf->crc_16), (uint8_t *) &framebuf->crc_16);
-    // todo remove this after RIOT interrupt fix
-    // send last bit again
 
     framebuf->pos = 0;
     pwm_set(device, channel, 0);     // turn off pwm

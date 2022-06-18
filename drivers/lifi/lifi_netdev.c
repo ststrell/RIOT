@@ -154,6 +154,13 @@ void isr_callback_input_pin(void *_dev)
     //                    puts("resetting");
                         uint16_t crc_16 = crc16_ccitt_calc(lifi_dev->input_buf.payload, lifi_dev->input_buf.len);
                         lifi_dev->input_buf.crc_16 = ntohs(lifi_dev->input_buf.crc_16);
+
+                        // reset transceiver
+                        transceiver_state->current_frame_part = e_first_receive;
+                        transceiver_state->currentByte = 0;
+                        transceiver_state->currentBit = 7;
+                        lifi_dev->state = LIFI_STATE_IDLE;
+
                         if (crc_16 != lifi_dev->input_buf.crc_16) {
     //                        puts("crc16 did not match!");
     //                        for (int pos = 0; pos < lifi_dev->input_buf.len; ++pos) {
@@ -164,10 +171,6 @@ void isr_callback_input_pin(void *_dev)
                         } else {
                             netdev_trigger_event_isr(&lifi_dev->netdev);
                         }
-                        transceiver_state->current_frame_part = e_first_receive;
-                        transceiver_state->currentByte = 0;
-                        transceiver_state->currentBit = 7;
-                        lifi_dev->state = LIFI_STATE_IDLE;
                     }
                 }
             } else {
@@ -204,6 +207,12 @@ static int lifi_init(netdev_t *netdev)
     init_transceiver_state(lifi_dev);
     lifi_dev->baud = 50;
 
+    /* Setup the layer 2 address, but do not accept CC1XXX_BCAST_ADDR (which
+     * has the value 0x00 and is used for broadcast)
+     */
+    lifi_dev->addr = LIFI_BCAST_ADDR+1;
+    lifi_eui_get(&lifi_dev->netdev, &lifi_dev->addr);
+    assert(lifi_dev->addr != LIFI_BCAST_ADDR);
 
     // Todo: any mutexes for ISR like in CC1101?
     if (0 == pwm_init(device, mode, frequency, resolution)) {
@@ -239,7 +248,7 @@ static int lifi_recv(netdev_t *netdev, void *buf, size_t len, void *info)
     lifi_t *dev = (lifi_t *)netdev;
 
     /* Call to cc110x_enter_rx_mode() will clear dev->buf.len, so back up it first */
-    int size = dev->input_buf.len;
+    int size = dev->input_buf.len + sizeof(lifi_l2hdr_t);
 
     if (!buf) {
         /* Get the size of the frame; if len > 0 then also drop the frame */
@@ -256,7 +265,7 @@ static int lifi_recv(netdev_t *netdev, void *buf, size_t len, void *info)
         return -ENOBUFS;
     }
 
-    memcpy(buf, dev->input_buf.payload, (size_t)size);
+    memcpy(buf, (void*) &dev->input_buf.layer2_hdr, (size_t)size);
 
     dev->input_buf.len = 0; /* frame collected, delete it */
     return size;
@@ -301,6 +310,7 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
 
     for (iolist_t *iol = iolist->iol_next; iol; iol = iol->iol_next) {
         if (iol->iol_len) {
+            DEBUG("Packet Type: %i\n",((gnrc_pktsnip_t*) iol)->type);
 //            if(iol->iol_len == 8 || iol->iol_len == 4){
 //                // Todo remove after debugging
 //                lifi_dev->state = LIFI_STATE_IDLE;
@@ -349,6 +359,10 @@ static int lifi_get(netdev_t *netdev, netopt_t opt,
         assert(max_len >= LIFI_ADDR_SIZE);
         *((uint8_t *)val) = dev->addr;
         return LIFI_ADDR_SIZE;
+    case NETOPT_PROTO:
+         assert(max_len == sizeof(gnrc_nettype_t));
+         *((gnrc_nettype_t *)val) = LIFI_DEFAULT_PROTOCOL;
+         return sizeof(gnrc_nettype_t);
     default:
         break;
     }
