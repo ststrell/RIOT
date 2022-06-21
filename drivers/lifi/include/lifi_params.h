@@ -38,7 +38,11 @@ extern "C" {
 #define DEFAULT_LIFI_PWM_FREQUENCY 38000
 
 #ifndef LIFI_PARAM_OUTPUT_PWM_DEVICE
+#ifdef BOARD_NUCLEO_F767ZI
+#define LIFI_PARAM_OUTPUT_PWM_DEVICE             0 /**< SPI-CS connected to LIFI */
+#else
 #define LIFI_PARAM_OUTPUT_PWM_DEVICE             1 /**< SPI-CS connected to LIFI */
+#endif
 #endif
 
 #ifndef LIFI_PARAM_OUTPUT_PWM_DEVICE_CHAN
@@ -46,7 +50,11 @@ extern "C" {
 #endif
 
 #ifndef LIFI_PARAM_INPUT_PIN
+#ifdef BOARD_NUCLEO_F767ZI
+#define LIFI_PARAM_INPUT_PIN             GPIO_PIN(PORT_F, 14)
+#else
 #define LIFI_PARAM_INPUT_PIN             GPIO_PIN(1,1) /**< SPI-CS connected to LIFI */
+#endif
 #endif
 
 #ifndef LIFI_PARAMS
