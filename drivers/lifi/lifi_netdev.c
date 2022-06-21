@@ -41,6 +41,7 @@
 #include "debug.h"
 
 #define PREAMBLE 0b11111111
+#define COOL_DOWN_RECEIVE_SEND_US 400
 
 static int lifi_init(netdev_t *netdev);
 static int lifi_recv(netdev_t *netdev, void *buf, size_t len, void *info);
@@ -73,8 +74,14 @@ void isr_callback_input_pin(void *_dev)
     gpio_toggle(RECEIVE_INTERRUPT);
     lifi_t *lifi_dev = (lifi_t *)_dev;
 
+    /* skip the pwm turn_off interrupt as it does not mean anything */
+    if (lifi_dev->transceiver_state.current_frame_part == e_first_receive && xtimer_diff(xtimer_now(),lifi_dev->transceiver_state.lastReceive) <
+                                                      xtimer_ticks_from_usec(COOL_DOWN_RECEIVE_SEND_US))
+    {
+        gpio_toggle(MULTI_PURPOSE_DEBUG);
+    }
     /* only start receiving if already not sending, receiving our own message does not make sense */
-    if (lifi_dev->state == LIFI_STATE_IDLE || lifi_dev->state == LIFI_STATE_RECEIVING) {
+    else if (lifi_dev->state == LIFI_STATE_IDLE || lifi_dev->state == LIFI_STATE_RECEIVING) {
         lifi_dev->state = LIFI_STATE_RECEIVING;
         lifi_transceiver_state_t *transceiver_state = &lifi_dev->transceiver_state;
 
@@ -146,7 +153,8 @@ void isr_callback_input_pin(void *_dev)
                     + sizeof(lifi_dev->input_buf.layer2_hdr)
                     + lifi_dev->input_buf.len
                     + sizeof(lifi_dev->input_buf.crc_16)) {
-                        gpio_toggle(MULTI_PURPOSE_DEBUG);
+                         /* Finish reception and save last receive to be able to skip pwm off interrupt */
+                        lifi_dev->transceiver_state.lastReceive = xtimer_now();
     //                for (int byte = 0; byte < lifi_dev->input_buf.len; ++byte) {
     ////                    printf("char: %c \n", lifi_dev->input_buf.payload[byte]);
     //                    printf("byte: %u \n", lifi_dev->input_buf.payload[byte]);
@@ -174,7 +182,11 @@ void isr_callback_input_pin(void *_dev)
                     }
                 }
             } else {
+                /* timing unexpected - reset and save last receive to be able to skip pwm off interrupt */
                 gpio_toggle(TIMING_ISSUE_PIN);
+                init_transceiver_state(lifi_dev);
+                lifi_dev->transceiver_state.lastReceive = xtimer_now();
+                gpio_toggle(MULTI_PURPOSE_DEBUG);
             }
 
         }
@@ -288,18 +300,18 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
     }
     switch (lifi_dev->state) {
         case LIFI_STATE_RECEIVING:
-            DEBUG("[LiFi] netdev_driver_t::send(): Refusing to send while "
+            printf("[LiFi] netdev_driver_t::send(): Refusing to send while "
                   "receiving a frame\n");
             return -EBUSY;
         case LIFI_STATE_TRANSMITTING:
-            DEBUG("[LiFi] netdev_driver_t::send(): Refusing to send while "
+            printf("[LiFi] netdev_driver_t::send(): Refusing to send while "
                   "transmitting a frame\n");
             return -EBUSY;
         case LIFI_STATE_IDLE:
             /* able to send, so let's go ahead */
             break;
         default:
-            DEBUG("[LiFi] netdev_driver_t::send(): Driver state %i prevents "
+            printf("[LiFi] netdev_driver_t::send(): Driver state %i prevents "
                   "sending\n", (int)lifi_dev->state);
             return -1;
     }
@@ -333,6 +345,11 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
 
     lifi_dev->output_buf.len = (uint8_t)payload_size;
     DEBUG("Sending %u bytes\n", payload_size);
+    /* wait with sending until the pwm off interrupt settled */
+    while (xtimer_diff(xtimer_now(),lifi_dev->transceiver_state.lastReceive) < xtimer_ticks_from_usec(400)){
+        xtimer_usleep(50);
+    }
+
     lifi_send_frame(lifi_dev);
     lifi_dev->state = LIFI_STATE_IDLE;
     return 0;

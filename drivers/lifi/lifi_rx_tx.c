@@ -152,6 +152,13 @@ void lifi_send_frame(lifi_t* lifi_dev){
     framebuf->crc_16 = htons(framebuf->crc_16);
     lifi_send_bits(lifi_dev, sizeof(framebuf->crc_16), (uint8_t *) &framebuf->crc_16);
 
+    bool lastStateHigh = lifi_dev->transceiver_state.previousStateHigh;
+    init_transceiver_state(lifi_dev);
+
+    if (lastStateHigh){
+        lifi_dev->transceiver_state.lastReceive = xtimer_now();
+        gpio_toggle(MULTI_PURPOSE_DEBUG);
+    }
     framebuf->pos = 0;
     pwm_set(device, channel, 0);     // turn off pwm
     lifi_dev->transceiver_state.current_frame_part = e_first_receive;
