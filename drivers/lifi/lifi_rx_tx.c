@@ -126,6 +126,16 @@ static void lifi_send_bits(lifi_t* lifi_dev,uint16_t num_bytes, uint8_t* bytes){
     }
 }
 
+static void send_initial_burst(lifi_t* lifi_dev){
+    uint8_t channel = lifi_dev->params.output_pwm_device_channel;
+    pwm_t device = lifi_dev->params.output_pwm_device;
+    uint16_t high_gain = lifi_dev->params.pwm_high_gain;
+
+    pwm_set(device, channel, high_gain);
+    xtimer_msleep(8);
+    pwm_set(device, channel, 0);
+}
+
 void lifi_send_frame(lifi_t* lifi_dev){
     const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
     const pwm_t device = lifi_dev->params.output_pwm_device;
@@ -139,6 +149,8 @@ void lifi_send_frame(lifi_t* lifi_dev){
     DEBUG("[LiFi] lifi_rx_tx:lifi_send_frame: CRC outgoing: %u , len: %u \n", framebuf->crc_16, framebuf->len);
 
     init_transceiver_state(lifi_dev);
+
+    send_initial_burst(lifi_dev);
 
     transceiver_state->current_frame_part = e_preamble;
     lifi_send_bits(lifi_dev, sizeof(framebuf->preamble),&framebuf->preamble);
@@ -157,19 +169,19 @@ void lifi_send_frame(lifi_t* lifi_dev){
 
     if (lastStateHigh){
         lifi_dev->transceiver_state.lastReceive = xtimer_now();
-        gpio_toggle(MULTI_PURPOSE_DEBUG);
     }
     framebuf->pos = 0;
     pwm_set(device, channel, 0);     // turn off pwm
-    lifi_dev->transceiver_state.current_frame_part = e_first_receive;
+    lifi_dev->transceiver_state.current_frame_part = e_initial_burst;
     gpio_clear(DATA_SENDER_PIN);
 }
+
 void read_store_bit(lifi_t* lifi_dev, uint8_t* storage_byte, uint8_t bit_to_read)
 {
     // todo universal high/low edge interpretation depending on transceiver type
     if (gpio_read(lifi_dev->params.input_pin) == 0) {
         // got high bit
-         gpio_set(BIT_INTERPRETATION_PIN);
+//         gpio_set(BIT_INTERPRETATION_PIN);
          lifi_dev->transceiver_state.high_bit_counter++;
          lifi_dev->transceiver_state.currentBit--;
          *storage_byte |= 1 << bit_to_read;
@@ -180,7 +192,7 @@ void read_store_bit(lifi_t* lifi_dev, uint8_t* storage_byte, uint8_t bit_to_read
         if(lifi_dev->transceiver_state.high_bit_counter >= 7){
             // discard stuffing bit
         } else {
-            gpio_clear(BIT_INTERPRETATION_PIN);
+//            gpio_clear(BIT_INTERPRETATION_PIN);
             lifi_dev->transceiver_state.currentBit--;
             *storage_byte &= ~(1 << bit_to_read);
         }
@@ -196,6 +208,8 @@ void lifi_preamble_sync(lifi_t* lifi_dev){
     lifi_transceiver_state_t* transceiver_state = &lifi_dev->transceiver_state;
 
     if (transceiver_state->current_frame_part == e_first_receive) {
+        lifi_dev->input_buf.len = 0;
+        gpio_toggle(BIT_INTERPRETATION_PIN);
         transceiver_state->lastReceive = xtimer_now();
         transceiver_state->meanHalfClockTicks = 0;
         transceiver_state->min_tolerated_half_clock = 0;
@@ -223,7 +237,7 @@ void lifi_preamble_sync(lifi_t* lifi_dev){
 void init_transceiver_state(lifi_t *lifi_dev) {
     lifi_dev->transceiver_state.min_tolerated_half_clock = 0;
     lifi_dev->transceiver_state.max_tolerated_half_clock = 0;
-    lifi_dev->transceiver_state.current_frame_part = e_first_receive;
+    lifi_dev->transceiver_state.current_frame_part = e_initial_burst;
     lifi_dev->transceiver_state.previousStateHigh = false;
     lifi_dev->transceiver_state.meanHalfClockTicks = 0;
     lifi_dev->transceiver_state.lastReceive = 0 ;

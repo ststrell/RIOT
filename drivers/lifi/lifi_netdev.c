@@ -74,26 +74,34 @@ void isr_callback_input_pin(void *_dev)
     gpio_toggle(RECEIVE_INTERRUPT);
     lifi_t *lifi_dev = (lifi_t *)_dev;
 
-    /* skip the pwm turn_off interrupt as it does not mean anything */
-    if (lifi_dev->transceiver_state.current_frame_part == e_first_receive && xtimer_diff(xtimer_now(),lifi_dev->transceiver_state.lastReceive) <
-                                                      xtimer_ticks_from_usec(COOL_DOWN_RECEIVE_SEND_US))
-    {
-        gpio_toggle(MULTI_PURPOSE_DEBUG);
-    }
     /* only start receiving if already not sending, receiving our own message does not make sense */
-    else if (lifi_dev->state == LIFI_STATE_IDLE || lifi_dev->state == LIFI_STATE_RECEIVING) {
+    if (lifi_dev->state == LIFI_STATE_IDLE || lifi_dev->state == LIFI_STATE_RECEIVING) {
         lifi_dev->state = LIFI_STATE_RECEIVING;
         lifi_transceiver_state_t *transceiver_state = &lifi_dev->transceiver_state;
 
         if (check_receive_timeout(lifi_dev)){
-            transceiver_state->current_frame_part = e_first_receive;
+            transceiver_state->current_frame_part = e_initial_burst;
             transceiver_state->currentByte = 0;
             transceiver_state->currentBit = 7;
             transceiver_state->high_bit_counter = 7;
         }
 
-        // Sync to sender frequency
-        if (transceiver_state->current_frame_part == e_first_receive
+        if (transceiver_state->current_frame_part == e_initial_burst){
+            /* start of potential initial burst */
+            if (gpio_read(lifi_dev->params.input_pin) == 0){
+                transceiver_state->lastReceive = xtimer_now();
+            }
+            /* end of potential initial burst */
+            else if (xtimer_usec_from_ticks(xtimer_diff(xtimer_now(), transceiver_state->lastReceive)) > 8000 &&
+                        (xtimer_usec_from_ticks(xtimer_diff(xtimer_now(), transceiver_state->lastReceive)) < 8500)){
+                transceiver_state->current_frame_part = e_first_receive;
+            } else {
+                lifi_dev->state = LIFI_STATE_IDLE;
+            }
+        }
+        // todo high/low bit transceiver interpretation state
+        // Sync to sender frequency, only enter when already syncing or at first receive + falling edge
+        else if ((transceiver_state->current_frame_part == e_first_receive && gpio_read(lifi_dev->params.input_pin) == 0)
             || transceiver_state->current_frame_part == e_preamble) {
             lifi_preamble_sync(lifi_dev);
         }
@@ -164,7 +172,7 @@ void isr_callback_input_pin(void *_dev)
                         lifi_dev->input_buf.crc_16 = ntohs(lifi_dev->input_buf.crc_16);
 
                         // reset transceiver
-                        transceiver_state->current_frame_part = e_first_receive;
+                        transceiver_state->current_frame_part = e_initial_burst;
                         transceiver_state->currentByte = 0;
                         transceiver_state->currentBit = 7;
                         lifi_dev->state = LIFI_STATE_IDLE;
@@ -186,7 +194,6 @@ void isr_callback_input_pin(void *_dev)
                 gpio_toggle(TIMING_ISSUE_PIN);
                 init_transceiver_state(lifi_dev);
                 lifi_dev->transceiver_state.lastReceive = xtimer_now();
-                gpio_toggle(MULTI_PURPOSE_DEBUG);
             }
 
         }
@@ -346,8 +353,8 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
     lifi_dev->output_buf.len = (uint8_t)payload_size;
     DEBUG("Sending %u bytes\n", payload_size);
     /* wait with sending until the pwm off interrupt settled */
-    while (xtimer_diff(xtimer_now(),lifi_dev->transceiver_state.lastReceive) < xtimer_ticks_from_usec(400)){
-        xtimer_usleep(50);
+    while (xtimer_diff(xtimer_now(),lifi_dev->transceiver_state.lastReceive) < xtimer_ticks_from_usec(COOL_DOWN_RECEIVE_SEND_US)){
+        xtimer_usleep(10);
     }
 
     lifi_send_frame(lifi_dev);

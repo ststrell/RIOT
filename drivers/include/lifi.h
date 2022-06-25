@@ -139,6 +139,7 @@ typedef struct __attribute__((packed)) {
 } lifi_framebuf_t;
 
 typedef enum {
+    e_initial_burst,
     e_first_receive,
     e_preamble,
     e_len,
