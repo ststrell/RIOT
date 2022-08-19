@@ -226,8 +226,8 @@ void lifi_preamble_sync(lifi_t* lifi_dev){
             transceiver_state->lastHalfEdge = xtimer_now();
             transceiver_state->current_frame_part = e_len;
             // todo move allowed range to settable variables
-            transceiver_state->min_tolerated_half_clock = (uint32_t)(0.6 * transceiver_state->meanHalfClockTicks);
-            transceiver_state->max_tolerated_half_clock = (uint32_t)(1.4 * transceiver_state->meanHalfClockTicks);
+            transceiver_state->min_tolerated_half_clock = (uint32_t)(0.5 * transceiver_state->meanHalfClockTicks);
+            transceiver_state->max_tolerated_half_clock = (uint32_t)(1.5 * transceiver_state->meanHalfClockTicks);
             transceiver_state->previousStateHigh = gpio_read(lifi_dev->params.input_pin) != 0;
             transceiver_state->high_bit_counter = 7;
         }

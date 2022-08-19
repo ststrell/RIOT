@@ -106,6 +106,7 @@ typedef struct {
     uint16_t pwm_resolution;
     uint16_t pwm_high_gain;
     uint16_t pwm_low_gain;
+    uint16_t pwm_turn_off_cooldown;
 } lifi_params_t;
 
 /**

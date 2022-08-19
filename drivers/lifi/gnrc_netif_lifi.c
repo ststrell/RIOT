@@ -138,9 +138,6 @@ static int lifi_adpt_send(gnrc_netif_t *netif, gnrc_pktsnip_t *pkt)
         l2hdr.dest_addr = addr[0];
         DEBUG("[lifi-gnrc] send: preparing to send unicast %02x --> %02x\n",
               (int)l2hdr.src_addr, (int)l2hdr.dest_addr);
-#ifdef MODULE_NETSTATS_L2
-        netif->stats.tx_unicast_count++;
-#endif
     }
 
     /* now let's send out the stuff */
@@ -152,6 +149,11 @@ static int lifi_adpt_send(gnrc_netif_t *netif, gnrc_pktsnip_t *pkt)
 
     DEBUG("[lifi-gnrc] send: triggering the drivers send function\n");
     res = netif->dev->driver->send(netif->dev, &iolist);
+
+#ifdef MODULE_NETSTATS_L2
+    netif->stats.tx_unicast_count++;
+    netif->stats.tx_bytes += res;
+#endif
 
     gnrc_pktbuf_release(pkt);
 

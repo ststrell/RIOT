@@ -37,11 +37,11 @@
 #include "lifi_netdev.h"
 #include "lifi_rx_tx.h"
 
-#define ENABLE_DEBUG 1
+#define ENABLE_DEBUG 0
 #include "debug.h"
 
 #define PREAMBLE 0b11111111
-#define COOL_DOWN_RECEIVE_SEND_US 400
+#define DEFAULT_COOL_DOWN_RECEIVE_SEND_US 700
 
 static int lifi_init(netdev_t *netdev);
 static int lifi_recv(netdev_t *netdev, void *buf, size_t len, void *info);
@@ -119,7 +119,7 @@ void isr_callback_input_pin(void *_dev)
                 gpio_toggle(FULL_EDGES_DROP_PIN);
             }
                 // edge seems to be on half period
-            else if (timediff >= transceiver_state->min_tolerated_half_clock * 2 &&
+            else if (timediff >= transceiver_state->min_tolerated_half_clock * 3 &&
                      timediff <= 2 * transceiver_state->max_tolerated_half_clock) {
                 transceiver_state->lastHalfEdge = xtimer_now();
                 // edge is in expected half period timing
@@ -162,7 +162,6 @@ void isr_callback_input_pin(void *_dev)
                     + lifi_dev->input_buf.len
                     + sizeof(lifi_dev->input_buf.crc_16)) {
                          /* Finish reception and save last receive to be able to skip pwm off interrupt */
-                        lifi_dev->transceiver_state.lastReceive = xtimer_now();
     //                for (int byte = 0; byte < lifi_dev->input_buf.len; ++byte) {
     ////                    printf("char: %c \n", lifi_dev->input_buf.payload[byte]);
     //                    printf("byte: %u \n", lifi_dev->input_buf.payload[byte]);
@@ -175,7 +174,9 @@ void isr_callback_input_pin(void *_dev)
                         transceiver_state->current_frame_part = e_initial_burst;
                         transceiver_state->currentByte = 0;
                         transceiver_state->currentBit = 7;
+                        lifi_dev->transceiver_state.lastReceive = xtimer_now();
                         lifi_dev->state = LIFI_STATE_IDLE;
+                        lifi_dev->params.pwm_turn_off_cooldown = (uint16_t)(lifi_dev->transceiver_state.meanHalfClockTicks*4);
 
                         if (crc_16 != lifi_dev->input_buf.crc_16) {
     //                        puts("crc16 did not match!");
@@ -185,6 +186,7 @@ void isr_callback_input_pin(void *_dev)
     //                        printf("\nCRC calculated: %u , CRC ingoing: %u , len: %u \n",crc_16, lifi_dev->input_buf.crc_16, lifi_dev->input_buf.len);
                             //todo errorhandling
                         } else {
+                            gpio_toggle(RECEIVE_INTERRUPT);
                             netdev_trigger_event_isr(&lifi_dev->netdev);
                         }
                     }
@@ -195,7 +197,6 @@ void isr_callback_input_pin(void *_dev)
                 init_transceiver_state(lifi_dev);
                 lifi_dev->transceiver_state.lastReceive = xtimer_now();
             }
-
         }
     }
 }
@@ -209,6 +210,7 @@ static int lifi_init(netdev_t *netdev)
     lifi_dev->params.pwm_resolution = DEFAULT_LIFI_PWM_RESOLUTION;
     lifi_dev->params.pwm_high_gain = DEFAULT_LIFI_PWM_RESOLUTION/2;
     lifi_dev->params.pwm_low_gain = 0;
+    lifi_dev->params.pwm_turn_off_cooldown = DEFAULT_COOL_DOWN_RECEIVE_SEND_US;
     const pwm_t device = lifi_dev->params.output_pwm_device;
     const uint8_t channel = lifi_dev->params.output_pwm_device_channel;
     const pwm_mode_t mode = PWM_LEFT;
@@ -307,18 +309,18 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
     }
     switch (lifi_dev->state) {
         case LIFI_STATE_RECEIVING:
-            printf("[LiFi] netdev_driver_t::send(): Refusing to send while "
+            DEBUG("[LiFi] netdev_driver_t::send(): Refusing to send while "
                   "receiving a frame\n");
             return -EBUSY;
         case LIFI_STATE_TRANSMITTING:
-            printf("[LiFi] netdev_driver_t::send(): Refusing to send while "
+            DEBUG("[LiFi] netdev_driver_t::send(): Refusing to send while "
                   "transmitting a frame\n");
             return -EBUSY;
         case LIFI_STATE_IDLE:
             /* able to send, so let's go ahead */
             break;
         default:
-            printf("[LiFi] netdev_driver_t::send(): Driver state %i prevents "
+            DEBUG("[LiFi] netdev_driver_t::send(): Driver state %i prevents "
                   "sending\n", (int)lifi_dev->state);
             return -1;
     }
@@ -353,13 +355,13 @@ static int lifi_send(netdev_t *netdev, const iolist_t *iolist)
     lifi_dev->output_buf.len = (uint8_t)payload_size;
     DEBUG("Sending %u bytes\n", payload_size);
     /* wait with sending until the pwm off interrupt settled */
-    while (xtimer_diff(xtimer_now(),lifi_dev->transceiver_state.lastReceive) < xtimer_ticks_from_usec(COOL_DOWN_RECEIVE_SEND_US)){
+    while (xtimer_diff(xtimer_now(),lifi_dev->transceiver_state.lastReceive) < xtimer_ticks_from_usec(lifi_dev->params.pwm_turn_off_cooldown)){
         xtimer_usleep(10);
     }
 
     lifi_send_frame(lifi_dev);
     lifi_dev->state = LIFI_STATE_IDLE;
-    return 0;
+    return payload_size;
 }
 
 

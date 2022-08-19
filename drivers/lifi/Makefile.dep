@@ -1,5 +1,7 @@
 ifneq (,$(filter lifi,$(USEMODULE)))
   USEMODULE += xtimer
+  USEMODULE += periph_pwm
+  USEMODULE += checksum
   FEATURES_REQUIRED += periph_gpio
   FEATURES_REQUIRED += periph_gpio_irq
 endif
